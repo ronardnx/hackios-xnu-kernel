@@ -1394,7 +1394,7 @@ to_memory(vm_offset_t start, vm_size_t size)
 	settle();
 }
 
-#define SPACE_TABLES            1024            /* 2 GB of addresses, were they all in use */
+#define SPACE_TABLES            4096            /* was 1024; need up to 1792+ for 3.5 GB address space */
 
 struct gpu_space {
 	const char *name;
@@ -3220,12 +3220,12 @@ step_frame(void)
 	 * they are there or not.
 	 */
 	ring_command(CP_EVENT_WRITE, 4);
-	ring(EVENT_FLUSH_COLOR);
+	ring(EVENT_FLUSH_COLOR | (board->is_a7xx ? (1u << 27) : 0));
 	ring(CORE_SCRATCH_ADDRESS + 32);
 	ring(0);
 	ring(0x0c0c0c0c);
 	ring_command(CP_EVENT_WRITE, 4);
-	ring(EVENT_CACHE_FLUSH);
+	ring(EVENT_CACHE_FLUSH | (board->is_a7xx ? (1u << 27) : 0));
 	ring(CORE_SCRATCH_ADDRESS + 16);
 	ring(0);
 	ring(0x0d0e0d0e);
@@ -3507,7 +3507,7 @@ uint32_t gpu_log;                       /* boot-arg gpu_log=1: a line for every 
 extern void hakios_tl(const char *format, ...) __printflike(1, 2);
 static struct {
 	uint64_t start, size;
-} gpu_free[1024];                       /* the addresses not in use, in order */
+} gpu_free[4096];                       /* the addresses not in use, in order */
 static unsigned gpu_free_count;
 
 extern void HakiosGPUStart(void);
@@ -3580,7 +3580,7 @@ hakios_gpu_parameter(uint32_t which, uint64_t *value)
 		*value = board->is_a7xx ? (3 * 1024 * 1024) : (512 * 1024);
 		return true;
 	case 0x03:                              /* CHIP_ID, with the speed bin above it */
-		*value = (uint64_t)board->gmu_chipid | ((uint64_t)speed_bin << 32);
+		*value = (board->is_a7xx ? 0x43051401ull : GPU_CHIP_ID) | ((uint64_t)speed_bin << 32);
 		return true;
 	case 0x04:                              /* MAX_FREQ */
 		*value = core_khz * 1000ull;
@@ -3802,7 +3802,7 @@ hakios_gpu_submit(const uint64_t *addresses, const uint32_t *words, uint32_t cou
 	ring_time(gpu_fence, 1);
 	ring_register(CP_SCRATCH_REG2, gpu_fence);
 	ring_command(CP_EVENT_WRITE, 4);
-	ring(EVENT_CACHE_FLUSH);
+	ring(EVENT_CACHE_FLUSH | (board->is_a7xx ? (1u << 27) : 0));
 	ring(CORE_SCRATCH_ADDRESS + GPU_FENCE_AT);
 	ring(0);
 	ring(gpu_fence);
@@ -3860,7 +3860,7 @@ hakios_adreno_minute(void)
 {
 	int32_t tenths[2];
 
-	if (!gpu_kept) {
+	if (!gpu_kept || board->is_a7xx) {
 		return;
 	}
 	need(&tsens);

@@ -677,11 +677,14 @@ gpu_draws(void)
 static void
 plain_vibrancy(void)
 {
-	if (gpu_draws()) {
+	char args[1024] = { 0 };
+	size_t size = sizeof(args);
+
+	if (sysctlbyname("kern.bootargs", args, &size, NULL, 0) == 0 && strstr(args, "vibrancy=1") != NULL) {
 		return;
 	}
 	CFPreferencesSetAppValue(CFSTR("BSUIVibrancyEffectViewDisabled"), kCFBooleanTrue, kCFPreferencesCurrentApplication);
-	say("hakios: SpringBoard: no GPU draws, vibrant views are plain (the lock screen's clock is white)\n");
+	say("hakios: SpringBoard: vibrant views are plain (lock screen clock is white, no vibrancy wash)\n");
 }
 
 /* ---- the side button's long press ---------------------------------------------------------------- */
