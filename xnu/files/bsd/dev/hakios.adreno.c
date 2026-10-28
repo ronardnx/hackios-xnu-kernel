@@ -272,6 +272,124 @@ wait_for(struct block *b, uint32_t offset, uint32_t mask, uint32_t value, uint32
 	return (rd(b->base + offset) & mask) == value;
 }
 
+/* ---- board support --------------------------------------------------------------------------------- */
+
+struct adreno_board {
+	const char *name;
+	uint32_t cmd_db_phys;
+	uint32_t cmd_db_size;
+	uint32_t qfprom_phys;
+	uint32_t qfprom_size;
+	uint32_t qfprom_speed_bin_offset;
+	uint32_t qfprom_speed_bin_shift;
+	uint32_t qfprom_speed_bin_mask;
+	uint32_t gcc_memnoc_cbcr;
+	uint32_t gpucc_phys;
+	uint32_t gpucc_size;
+	uint32_t gpucc_cx_gdscr;
+	uint32_t gpucc_gx_gdscr;
+	uint32_t gpucc_ahb_cbcr;
+	uint32_t gpucc_cxo_cbcr;
+	uint32_t gpucc_cx_gmu_cbcr;
+	uint32_t gpucc_hub_cx_int_cbcr;
+	uint32_t gpucc_smmu_vote_cbcr;
+	uint32_t gpucc_gmu_rcgr;
+	uint32_t gmu_phys;
+	uint32_t gmu_size;
+	uint32_t rscc_phys;
+	uint32_t rscc_size;
+	uint32_t pdc_phys;
+	uint32_t pdc_size;
+	uint64_t zap_memory;
+	uint32_t smmu_phys;
+	uint32_t smmu_size;
+	uint32_t smmu_stream_mask;
+	const char *gmu_fw_name;
+	const char *zap_fw_name;
+	const char *zap_b02_name;
+	const char *sqe_fw_name;
+	uint32_t gmu_chipid;
+	bool is_a7xx;
+};
+
+static const struct adreno_board board_redwood = {
+	.name = "redwood (SM7325 / Adreno 642L)",
+	.cmd_db_phys = 0x80860000UL,
+	.cmd_db_size = 0x20000UL,
+	.qfprom_phys = 0x00780000UL,
+	.qfprom_size = 0x7000UL,
+	.qfprom_speed_bin_offset = 0x41e9,
+	.qfprom_speed_bin_shift = 5,
+	.qfprom_speed_bin_mask = 0xff,
+	.gcc_memnoc_cbcr = 0x7100c,
+	.gpucc_phys = 0x03d90000UL,
+	.gpucc_size = 0x9000UL,
+	.gpucc_cx_gdscr = 0x106c,
+	.gpucc_gx_gdscr = 0x100c,
+	.gpucc_ahb_cbcr = 0x1078,
+	.gpucc_cxo_cbcr = 0x109c,
+	.gpucc_cx_gmu_cbcr = 0x1098,
+	.gpucc_hub_cx_int_cbcr = 0x1204,
+	.gpucc_smmu_vote_cbcr = 0x5000,
+	.gpucc_gmu_rcgr = 0x1120,
+	.gmu_phys = 0x03d6a000UL,
+	.gmu_size = 0x34000UL,
+	.rscc_phys = 0x03de0000UL,
+	.rscc_size = 0x2000UL,
+	.pdc_phys = 0x0b290000UL,
+	.pdc_size = 0x10000UL,
+	.zap_memory = 0x8b71a000ull,
+	.smmu_phys = 0x03da0000UL,
+	.smmu_size = 0x20000UL,
+	.smmu_stream_mask = 0x400,
+	.gmu_fw_name = "a660_gmu.bin",
+	.zap_fw_name = "a660_zap.mdt",
+	.zap_b02_name = "a660_zap.b02",
+	.sqe_fw_name = "a660_sqe.fw",
+	.gmu_chipid = 0x06035000,
+	.is_a7xx = false,
+};
+
+static const struct adreno_board board_corvette = {
+	.name = "corvette/giulia (SM8650 / Adreno 750)",
+	.cmd_db_phys = 0x81c60000UL,
+	.cmd_db_size = 0x20000UL,
+	.qfprom_phys = 0x221c2000UL,
+	.qfprom_size = 0x1000UL,
+	.qfprom_speed_bin_offset = 0x9b,
+	.qfprom_speed_bin_shift = 4,
+	.qfprom_speed_bin_mask = 0x07,
+	.gcc_memnoc_cbcr = 0x71010,
+	.gpucc_phys = 0x03d90000UL,
+	.gpucc_size = 0x10000UL,
+	.gpucc_cx_gdscr = 0x9108,
+	.gpucc_gx_gdscr = 0x905c,
+	.gpucc_ahb_cbcr = 0x911c,
+	.gpucc_cxo_cbcr = 0x9144,
+	.gpucc_cx_gmu_cbcr = 0x913c,
+	.gpucc_hub_cx_int_cbcr = 0x9148,
+	.gpucc_smmu_vote_cbcr = 0x7000,
+	.gpucc_gmu_rcgr = 0x9318,
+	.gmu_phys = 0x03d6a000UL,
+	.gmu_size = 0x34000UL,
+	.rscc_phys = 0x03d50000UL,
+	.rscc_size = 0x10000UL,
+	.pdc_phys = 0x0b280000UL,
+	.pdc_size = 0x10000UL,
+	.zap_memory = 0x9b09a000ull,
+	.smmu_phys = 0x03da0000UL,
+	.smmu_size = 0x40000UL,
+	.smmu_stream_mask = 0x000,
+	.gmu_fw_name = "gmu_gen70900.bin",
+	.zap_fw_name = "gen70900_zap.mdt",
+	.zap_b02_name = "gen70900_zap.b02",
+	.sqe_fw_name = "gen70900_sqe.fw",
+	.gmu_chipid = 0x07090000,
+	.is_a7xx = true,
+};
+
+static const struct adreno_board *board = &board_corvette;
+
 /* ---- step 1: the clocks from outside, and RPMh's names ------------------------------------------------ */
 
 /*
@@ -329,7 +447,7 @@ rpmh_resource(const char *name, uint16_t *levels, unsigned *level_count)
 		*level_count = 0;
 	}
 	if (db == NULL) {
-		db = cmd_db = (const struct cmd_db_header *)ml_io_map_wcomb(CMD_DB_PHYS, CMD_DB_SIZE);  /* memory, not registers */
+		db = cmd_db = (const struct cmd_db_header *)ml_io_map_wcomb(board->cmd_db_phys, board->cmd_db_size);  /* memory, not registers */
 	}
 	if (db->magic[0] != 0xdb || db->magic[1] != 0x30 || db->magic[2] != 0x03 || db->magic[3] != 0x0c) {
 		return 0;
@@ -391,11 +509,13 @@ step_outside(void)
 	announce("read the GPU's clocks in the global clock controller (registers the touch screen driver uses too)");
 	get(&gcc, "pll votes", GCC_PLL_VOTE);
 	get(&gcc, "gpu_cfg_ahb", GCC_GPU_CFG_AHB_CBCR);
-	get(&gcc, "gpu_memnoc_gfx", GCC_GPU_MEMNOC_GFX_CBCR);
+	get(&gcc, "gpu_memnoc_gfx", board->gcc_memnoc_cbcr);
 	get(&gcc, "gpu_snoc_dvm_gfx", GCC_GPU_SNOC_DVM_GFX_CBCR);
-	get(&gcc, "ddrss_gpu_axi", GCC_DDRSS_GPU_AXI_CBCR);
+	if (!board->is_a7xx) {
+		get(&gcc, "ddrss_gpu_axi", GCC_DDRSS_GPU_AXI_CBCR);
+	}
 
-	announce("look up the GPU's supply rails in the boot loader's list of RPMh resources (memory at 0x80860000)");
+	announce("look up the GPU's supply rails in the boot loader's list of RPMh resources");
 	show_rpmh_resource("gfx.lvl");          /* the 3D core's own rail (dt: VDD_GFX_LEVEL, PM8350C S7) */
 	show_rpmh_resource("cx.lvl");           /* the rail of the CX half, shared with most of the SoC */
 	show_rpmh_resource("mx.lvl");           /* memories */
@@ -434,6 +554,15 @@ static bool
 step_fuses(void)
 {
 	uint32_t bin, gaming;
+
+	if (board->is_a7xx) {
+		announce("read the GPU's speed bin fuse (qfprom)");
+		bin = get8(&qfprom, "speed bin", board->qfprom_speed_bin_offset);
+		bin = (bin >> board->qfprom_speed_bin_shift) & board->qfprom_speed_bin_mask;
+		speed_bin = bin;
+		printf("adreno: %u: speed bin %u: Adreno 750 (Gen 7.9)\n", step, bin);
+		return true;
+	}
 
 	announce("read the GPU's fuses in the error-corrected copy (0x784000), which Linux reads");
 	bin = get8(&qfprom, "speed bin, low", QFPROM_CORRECTED + QFPROM_GPU_SPEED_BIN);
@@ -487,36 +616,47 @@ static bool
 step_gpucc(void)
 {
 	announce("make sure the clock of the GPU clock controller's registers runs (gcc_gpu_cfg_ahb)");
-	if ((set(&gcc, "gpu_cfg_ahb", GCC_GPU_CFG_AHB_CBCR, CBCR_ENABLE) & CBCR_OFF) &&
-	    !wait_for(&gcc, GCC_GPU_CFG_AHB_CBCR, CBCR_OFF, 0, 10)) {
-		printf("adreno: %u: it stays off (%#x): the GPU's clock controller would not answer\n", step,
-		    rd(gcc.base + GCC_GPU_CFG_AHB_CBCR));
-		return false;
+	set(&gcc, "gpu_cfg_ahb", GCC_GPU_CFG_AHB_CBCR, CBCR_ENABLE);
+	if (!board->is_a7xx) {
+		if ((rd(gcc.base + GCC_GPU_CFG_AHB_CBCR) & CBCR_OFF) &&
+		    !wait_for(&gcc, GCC_GPU_CFG_AHB_CBCR, CBCR_OFF, 0, 10)) {
+			printf("adreno: %u: it stays off (%#x): the GPU's clock controller would not answer\n", step,
+			    rd(gcc.base + GCC_GPU_CFG_AHB_CBCR));
+			return false;
+		}
 	}
 
 	announce("read the GPU's clock controller (0x3d90000) as it is: the first access to the GPU's part of the SoC");
-	get(&gpucc, "cx_gdscr", GPUCC_CX_GDSCR);
-	get(&gpucc, "cx_hw_ctrl", GPUCC_CX_HW_CTRL);
-	get(&gpucc, "gx_gdscr", GPUCC_GX_GDSCR);
-	get(&gpucc, "gx_sw_reset", GPUCC_GX_SW_RESET);
-	get(&gpucc, "gx_domain_misc", GPUCC_GX_DOMAIN_MISC);
+	get(&gpucc, "cx_gdscr", board->gpucc_cx_gdscr);
+	if (!board->is_a7xx) {
+		get(&gpucc, "cx_hw_ctrl", GPUCC_CX_HW_CTRL);
+	}
+	get(&gpucc, "gx_gdscr", board->gpucc_gx_gdscr);
+	if (!board->is_a7xx) {
+		get(&gpucc, "gx_sw_reset", GPUCC_GX_SW_RESET);
+		get(&gpucc, "gx_domain_misc", GPUCC_GX_DOMAIN_MISC);
+	}
 	get(&gpucc, "pll0 mode", GPUCC_PLL0_MODE);
 	get(&gpucc, "pll0 multiplier", GPUCC_PLL0_MODE + 4);
 	get(&gpucc, "pll1 mode", GPUCC_PLL1_MODE);
 	get(&gpucc, "pll1 multiplier", GPUCC_PLL1_MODE + 4);
-	get(&gpucc, "gmu_clk_src command", GPUCC_GMU_RCGR);
-	get(&gpucc, "gmu_clk_src source", GPUCC_GMU_RCGR + 4);
-	get(&gpucc, "hub_clk_src command", GPUCC_HUB_RCGR);
-	get(&gpucc, "hub_clk_src source", GPUCC_HUB_RCGR + 4);
-	get(&gpucc, "cxo_aon", GPUCC_CXO_AON_CBCR);
-	get(&gpucc, "gx_gmu", GPUCC_GX_GMU_CBCR);
-	get(&gpucc, "ahb", GPUCC_AHB_CBCR);
-	get(&gpucc, "cx_gmu", GPUCC_CX_GMU_CBCR);
-	get(&gpucc, "cxo", GPUCC_CXO_CBCR);
-	get(&gpucc, "cb", GPUCC_CB_CBCR);
-	get(&gpucc, "hub_aon", GPUCC_HUB_AON_CBCR);
-	get(&gpucc, "hub_cx_int", GPUCC_HUB_CX_INT_CBCR);
-	get(&gpucc, "smmu vote", GPUCC_SMMU_VOTE_CBCR);
+	get(&gpucc, "gmu_clk_src command", board->gpucc_gmu_rcgr);
+	get(&gpucc, "gmu_clk_src source", board->gpucc_gmu_rcgr + 4);
+	if (!board->is_a7xx) {
+		get(&gpucc, "hub_clk_src command", GPUCC_HUB_RCGR);
+		get(&gpucc, "hub_clk_src source", GPUCC_HUB_RCGR + 4);
+		get(&gpucc, "cxo_aon", GPUCC_CXO_AON_CBCR);
+		get(&gpucc, "gx_gmu", GPUCC_GX_GMU_CBCR);
+	}
+	get(&gpucc, "ahb", board->gpucc_ahb_cbcr);
+	get(&gpucc, "cx_gmu", board->gpucc_cx_gmu_cbcr);
+	get(&gpucc, "cxo", board->gpucc_cxo_cbcr);
+	if (!board->is_a7xx) {
+		get(&gpucc, "cb", GPUCC_CB_CBCR);
+		get(&gpucc, "hub_aon", GPUCC_HUB_AON_CBCR);
+	}
+	get(&gpucc, "hub_cx_int", board->gpucc_hub_cx_int_cbcr);
+	get(&gpucc, "smmu vote", board->gpucc_smmu_vote_cbcr);
 	return true;
 }
 
@@ -528,7 +668,7 @@ gpucc_answers(void)
 {
 	need(&gcc);
 	need(&gpucc);
-	if (rd(gcc.base + GCC_GPU_CFG_AHB_CBCR) & CBCR_OFF) {
+	if (!(rd(gcc.base + GCC_GPU_CFG_AHB_CBCR) & CBCR_ENABLE)) {
 		printf("adreno: %u: the GPU clock controller's registers have no clock (gcc gpu_cfg_ahb %#x): step 3\n", step,
 		    rd(gcc.base + GCC_GPU_CFG_AHB_CBCR));
 		return false;
@@ -539,7 +679,10 @@ gpucc_answers(void)
 static bool
 cx_is_on(void)
 {
-	return (rd(gpucc.base + GPUCC_CX_GDSCR) | rd(gpucc.base + GPUCC_CX_HW_CTRL)) & GDSC_POWER_ON;
+	if (board->is_a7xx) {
+		return (rd(gpucc.base + board->gpucc_cx_gdscr) & GDSC_POWER_ON) != 0;
+	}
+	return (rd(gpucc.base + board->gpucc_cx_gdscr) | rd(gpucc.base + GPUCC_CX_HW_CTRL)) & GDSC_POWER_ON;
 }
 
 static void stale_stop(void);
@@ -558,8 +701,10 @@ step_cx_power(void)
 		return false;
 	}
 	announce("switch the CX half of the GPU block on (gpu_cx_gdsc): clear the collapse bit of its power switch");
-	gdscr = get(&gpucc, "cx_gdscr", GPUCC_CX_GDSCR);
-	get(&gpucc, "cx_hw_ctrl", GPUCC_CX_HW_CTRL);
+	gdscr = get(&gpucc, "cx_gdscr", board->gpucc_cx_gdscr);
+	if (!board->is_a7xx) {
+		get(&gpucc, "cx_hw_ctrl", GPUCC_CX_HW_CTRL);
+	}
 	if (cx_is_on()) {
 		/*
 		 * A kernel that kept the GPU for the system to use (adreno_keep) leaves it running when
@@ -573,24 +718,26 @@ step_cx_power(void)
 			printf("adreno: %u: CX stays on: going on with it as it is\n", step);
 			return true;
 		}
-		gdscr = rd(gpucc.base + GPUCC_CX_GDSCR);
+		gdscr = rd(gpucc.base + board->gpucc_cx_gdscr);
 	}
 	if (gdscr & GDSC_HW_CONTROL) {
 		printf("adreno: %u: the switch is under hardware control: not ours to operate\n", step);
 		return false;
 	}
-	put(&gpucc, "cx_gdscr", GPUCC_CX_GDSCR, gdscr & ~GDSC_SW_COLLAPSE);
+	put(&gpucc, "cx_gdscr", board->gpucc_cx_gdscr, gdscr & ~GDSC_SW_COLLAPSE);
 	for (int i = 0; i < 500 && !cx_is_on(); i++) {
 		sleep_us(100);
 	}
-	get(&gpucc, "cx_gdscr", GPUCC_CX_GDSCR);
-	get(&gpucc, "cx_hw_ctrl", GPUCC_CX_HW_CTRL);
+	get(&gpucc, "cx_gdscr", board->gpucc_cx_gdscr);
+	if (!board->is_a7xx) {
+		get(&gpucc, "cx_hw_ctrl", GPUCC_CX_HW_CTRL);
+	}
 	if (!cx_is_on()) {
 		printf("adreno: %u: CX does not come on\n", step);
 		return false;
 	}
 	printf("adreno: %u: CX is on\n", step);
-	if (rd(gpucc.base + GPUCC_GX_GDSCR) & GDSC_POWER_ON) {
+	if (rd(gpucc.base + board->gpucc_gx_gdscr) & GDSC_POWER_ON) {
 		/*
 		 * The 3D core kept its power while the rest of the block lost it: an ending that went
 		 * wrong (a GMU that did not answer, before gpu_block_stop() switched the core off
@@ -659,6 +806,26 @@ step_clocks(void)
 		printf("adreno: %u: CX is off: step 4\n", step);
 		return false;
 	}
+
+	if (board->is_a7xx) {
+		announce("in the global clock controller: ask for the 300 MHz tap for the GPU; the GPU's bus clocks on");
+		set(&gcc, "pll votes", GCC_PLL_VOTE, GCC_PLL_VOTE_GPU_DIV);
+		if (!clock_on(&gcc, "gpu_memnoc_gfx", board->gcc_memnoc_cbcr, false) ||
+		    !clock_on(&gcc, "gpu_snoc_dvm_gfx", GCC_GPU_SNOC_DVM_GFX_CBCR, true)) {
+			return false;
+		}
+
+		announce("in the GPU's clock controller: the clocks of the GMU and of the SMMU on");
+		if (!clock_on(&gpucc, "cxo", board->gpucc_cxo_cbcr, true) ||
+		    !clock_on(&gpucc, "ahb", board->gpucc_ahb_cbcr, false) ||
+		    !clock_on(&gpucc, "hub_cx_int", board->gpucc_hub_cx_int_cbcr, true) ||
+		    !clock_on(&gpucc, "cx_gmu", board->gpucc_cx_gmu_cbcr, true) ||
+		    !clock_on(&gpucc, "smmu vote", board->gpucc_smmu_vote_cbcr, false)) {
+			return false;
+		}
+		return true;
+	}
+
 	announce("in the global clock controller: ask for the 300 MHz tap for the GPU; the GPU's bus and memory clocks on");
 	set(&gcc, "pll votes", GCC_PLL_VOTE, GCC_PLL_VOTE_GPU_DIV);
 	if (!clock_on(&gcc, "gpu_memnoc_gfx", GCC_GPU_MEMNOC_GFX_CBCR, false) ||
@@ -863,11 +1030,14 @@ cx_ready(void)
 	if (!gpucc_answers()) {
 		return false;
 	}
-	gmu_clock = rd(gpucc.base + GPUCC_CX_GMU_CBCR);
+	gmu_clock = rd(gpucc.base + board->gpucc_cx_gmu_cbcr);
 	if (!cx_is_on() || (gmu_clock & (CBCR_ENABLE | CBCR_OFF)) != CBCR_ENABLE) {
 		printf("adreno: %u: needs CX on (it is %s) and the GMU's clock running (cx_gmu %#x): steps 4 and 5\n", step,
 		    cx_is_on() ? "on" : "off", gmu_clock);
 		return false;
+	}
+	if (board->is_a7xx) {
+		return true;
 	}
 	ahb_hz = measure_quietly(GPUCC_DEBUG_AHB);
 	if (ahb_hz == MEASURE_FAILED) {
@@ -953,8 +1123,10 @@ step_first_words(void)
 	hz = nanos ? (uint32_t)((uint64_t)hz * NSEC_PER_SEC / nanos) : 0;
 	printf("adreno: %u: the GMU's counter counts at %u Hz: %s\n", step, hz, hz > 18000000 && hz < 20500000 ?
 	    "the 19.2 MHz crystal: THE GPU BLOCK IS ALIVE" : "not the crystal's 19.2 MHz (firmware may start it): see the rest");
-	for (uint32_t i = 0; i < 5; i++) {
-		get(&gmu, "dtcm, where firmware has its versions", GMU_DTCM_VERSIONS + 4 * i);
+	if (!board->is_a7xx) {
+		for (uint32_t i = 0; i < 5; i++) {
+			get(&gmu, "dtcm, where firmware has its versions", GMU_DTCM_VERSIONS + 4 * i);
+		}
 	}
 
 	announce("read the GPU's bus interface (0x3d0f000) and the CX odds and ends (0x3d9e000)");
@@ -1015,7 +1187,7 @@ step_rscc(void)
 	if (!cx_ready()) {
 		return false;
 	}
-	announce("read the GMU's RPMh channel (0x3de0000)");
+	announce("read the GMU's RPMh channel");
 	get(&rscc, "rsc_status0_drv0", RSCC_RSC_STATUS0_DRV0);
 	get(&rscc, "pdc_slave_id_drv0", RSCC_PDC_SLAVE_ID_DRV0);
 	get(&rscc, "seq_busy_drv0", RSCC_SEQ_BUSY_DRV0);
@@ -1062,7 +1234,7 @@ smmu_layout(void)
 	smmu_matches = idr0 & 0xff;
 	printf("adreno: %u: SMMU: %u stream match registers, %u contexts, %u pages of %#x before the contexts' own\n", step,
 	    smmu_matches, smmu_contexts, smmu_pages, smmu_page);
-	if (2 * smmu_pages * smmu_page != smmu.size) {
+	if (2 * smmu_pages * smmu_page > smmu.size) {
 		printf("adreno: %u: that makes %#x of registers, the device tree says %#x: not reading further\n", step,
 		    2 * smmu_pages * smmu_page, smmu.size);
 		return false;
@@ -1415,8 +1587,8 @@ static bool
 space_stream(struct gpu_space *space, uint32_t match, uint32_t stream)
 {
 	put(&smmu, "s2cr", SMMU_S2CR(match), space->context);
-	put(&smmu, "smr", SMMU_SMR(match), SMMU_SMR_VALID | SMMU_STREAM_MASK << 16 | stream);
-	if (get(&smmu, "smr", SMMU_SMR(match)) != (SMMU_SMR_VALID | SMMU_STREAM_MASK << 16 | stream) ||
+	put(&smmu, "smr", SMMU_SMR(match), SMMU_SMR_VALID | board->smmu_stream_mask << 16 | stream);
+	if (get(&smmu, "smr", SMMU_SMR(match)) != (SMMU_SMR_VALID | board->smmu_stream_mask << 16 | stream) ||
 	    (get(&smmu, "s2cr", SMMU_S2CR(match)) & 0x300ff) != space->context) {
 		printf("adreno: %u: the SMMU did not take what was written: stream %u is not going through context %u\n", step,
 		    stream, space->context);
@@ -1456,10 +1628,10 @@ space_on(struct gpu_space *space, uint32_t match, uint32_t stream)
 	}
 	put(&smmu, "cb sctlr", context + SMMU_CB_SCTLR, SMMU_SCTLR_ON | space->control);
 	put(&smmu, "s2cr", SMMU_S2CR(match), space->context);
-	put(&smmu, "smr", SMMU_SMR(match), SMMU_SMR_VALID | SMMU_STREAM_MASK << 16 | stream);
+	put(&smmu, "smr", SMMU_SMR(match), SMMU_SMR_VALID | board->smmu_stream_mask << 16 | stream);
 
 	/* the global ones are the hypervisor's to grant: see what it made of them */
-	if (get(&smmu, "smr", SMMU_SMR(match)) != (SMMU_SMR_VALID | SMMU_STREAM_MASK << 16 | stream) ||
+	if (get(&smmu, "smr", SMMU_SMR(match)) != (SMMU_SMR_VALID | board->smmu_stream_mask << 16 | stream) ||
 	    (get(&smmu, "s2cr", SMMU_S2CR(match)) & 0x300ff) != space->context ||
 	    (get(&smmu, "cbar", smmu_page + SMMU_CBAR(space->context)) & 0x30000) != (SMMU_CBAR_STAGE_1 & 0x30000) ||
 	    !(get(&smmu, "cb sctlr", context + SMMU_CB_SCTLR) & 1) ||
@@ -1646,9 +1818,9 @@ zap_header(uint64_t *phys)
 	const uint8_t *header;
 	vm_offset_t page = 0;
 	uint64_t size = 0;
-	uint32_t segments, hashes;
+	uint32_t segments, hashes = 0;
 
-	header = image_file("fw", "a660_zap.mdt", &size);
+	header = image_file("fw", board->zap_fw_name, &size);
 	if (header == NULL) {
 		return false;
 	}
@@ -1659,7 +1831,18 @@ zap_header(uint64_t *phys)
 		    header[2], header[3], segments);
 		return false;
 	}
-	memcpy(&hashes, header + 52 + 32 + 16, sizeof(hashes));
+	for (uint32_t i = 1; i < segments; i++) {
+		uint32_t p_flags, p_filesz;
+		memcpy(&p_filesz, header + 52 + 32 * i + 16, sizeof(p_filesz));
+		memcpy(&p_flags, header + 52 + 32 * i + 24, sizeof(p_flags));
+		if ((p_flags & (7u << 24)) == (2u << 24)) { /* QCOM_MDT_TYPE_HASH */
+			hashes = p_filesz;
+			break;
+		}
+	}
+	if (hashes == 0) {
+		memcpy(&hashes, header + 52 + 32 + 16, sizeof(hashes));
+	}
 	printf("adreno: %u: an ELF header of %u segments, %u bytes with its table, then %llu bytes; by the table, %u of hashes\n",
 	    step, segments, 52 + 32 * segments, size - (52 + 32 * segments), hashes);
 	if (52 + 32 * segments + (uint64_t)hashes != size) {
@@ -1682,7 +1865,7 @@ step_zap_signature(void)
 	uint64_t header = 0, answer = ~0ull;
 	int32_t result;
 
-	announce("find the zap shader's header, fw/a660_zap.mdt, in the small image that came with the kernel");
+	announce("find the zap shader's header in the small image that came with the kernel");
 	if (!zap_header(&header)) {
 		return false;
 	}
@@ -1743,8 +1926,8 @@ step_gmu_space(void)
 	if (!cx_ready()) {
 		return false;
 	}
-	announce("find the GMU's firmware, fw/a660_gmu.bin, in the small image, and make the memory it asks for");
-	gmu_firmware = image_file("fw", "a660_gmu.bin", &gmu_firmware_size);
+	announce("find the GMU's firmware in the small image, and make the memory it asks for");
+	gmu_firmware = image_file("fw", board->gmu_fw_name, &gmu_firmware_size);
 	if (gmu_firmware == NULL) {
 		return false;
 	}
@@ -1875,6 +2058,9 @@ step_gmu_firmware(void)
 #define GMU_RSCC_CONTROL_REQ    GMU_WORD(0x9307)
 #define GMU_AO_AHB_FENCE_CTRL   GMU_WORD(0x9310)
 #define GMU_AHB_FENCE_RANGE_0   GMU_WORD(0x9311)
+#define GEN7_GMU_GENERAL_8      GMU_WORD(0x51cd)
+#define GEN7_GMU_GENERAL_9      GMU_WORD(0x51ce)
+#define GEN7_GMU_GENERAL_10     GMU_WORD(0x51cf)
 #define GMU_CHIP                0x06035000      /* dt qcom,chipid 0x06030500 the way the firmware wants it */
 #define GMU_STARTED_MASK        0x1ff           /* of fw_init_result, for firmware newer than core 0x20010004 */
 #define GMU_STARTED             0x100
@@ -1948,22 +2134,36 @@ step_gmu_start(void)
 	rsc_awake = true;
 	put(&gmu, "cx_falnext_intf", GMU_CX_FALNEXT_INTF, 1);
 	put(&gmu, "cx_fal_intf", GMU_CX_FAL_INTF, 1);
-	put(&gmu, "general_7", GMU_GENERAL_7, 1);
+	if (!board->is_a7xx) {
+		put(&gmu, "general_7", GMU_GENERAL_7, 1);
+	}
 	put(&gmu, "cm3_fw_init_result", GMU_CM3_FW_INIT_RESULT, 0);
 	put(&gmu, "cm3_boot_config", GMU_CM3_BOOT_CONFIG, 2);
 	put(&gmu, "hfi_qtbl_addr", GMU_HFI_QTBL_ADDR, GMU_HFI_ADDRESS);
 	put(&gmu, "hfi_qtbl_info", GMU_HFI_QTBL_INFO, 1);
-	put(&gmu, "ahb_fence_range_0", GMU_AHB_FENCE_RANGE_0, 1u << 31 | (0xa << 2) << 18 | 0x8a0);
+	if (board->is_a7xx) {
+		put(&gmu, "ahb_fence_range_0", GMU_AHB_FENCE_RANGE_0, (1u << 31) | (0x32u << 18) | 0x8a0u);
+	} else {
+		put(&gmu, "ahb_fence_range_0", GMU_AHB_FENCE_RANGE_0, 1u << 31 | (0xa << 2) << 18 | 0x8a0);
+	}
 	put(&gmu, "cm3_cfg", GMU_CM3_CFG, 0x4052);
 	put(&gbif, "halt", GBIF_HALT, 0);
-	put(&gmu, "pwr_col_cp_resp", GMU_PWR_COL_CP_RESP, 0);
-	put(&gmu, "hfi_sfr_addr", GMU_HFI_SFR_ADDR, GMU_CHIP);
-	put(&gmu, "pwr_col_cp_msg", GMU_PWR_COL_CP_MSG, GMU_LOG_ADDRESS | (GMU_LOG_SIZE / 4096 - 1));
+	if (board->is_a7xx) {
+		put(&gmu, "general_9", GEN7_GMU_GENERAL_9, 0);
+		put(&gmu, "general_10", GEN7_GMU_GENERAL_10, board->gmu_chipid);
+		put(&gmu, "general_8", GEN7_GMU_GENERAL_8, (GMU_LOG_ADDRESS & 0xfffff000u) | ((GMU_LOG_SIZE / 4096 - 1) & 0xffu));
+	} else {
+		put(&gmu, "pwr_col_cp_resp", GMU_PWR_COL_CP_RESP, 0);
+		put(&gmu, "hfi_sfr_addr", GMU_HFI_SFR_ADDR, GMU_CHIP);
+		put(&gmu, "pwr_col_cp_msg", GMU_PWR_COL_CP_MSG, GMU_LOG_ADDRESS | (GMU_LOG_SIZE / 4096 - 1));
+	}
 	put(&gmu, "sys_bus_config", GMU_SYS_BUS_CONFIG, 1);
 	put(&gmu, "icache_config", GMU_ICACHE_CONFIG, 1);
 	put(&gmu, "dcache_config", GMU_DCACHE_CONFIG, 1);
-	put(&gmu, "pwr_col_inter_frame_ctrl", GMU_PWR_COL_INTER_FRAME_CTRL, 0x9c40400);
-	set(&gmu, "rpmh_ctrl", GMU_RPMH_CTRL, GMU_RPMH_CTRL_ALL);
+	if (!board->is_a7xx) {
+		put(&gmu, "pwr_col_inter_frame_ctrl", GMU_PWR_COL_INTER_FRAME_CTRL, 0x9c40400);
+		set(&gmu, "rpmh_ctrl", GMU_RPMH_CTRL, GMU_RPMH_CTRL_ALL);
+	}
 	put(&gmu, "gmu2host_intr_clr", GMU_GMU2HOST_INTR_CLR, 0xffffffff);
 
 	gmu_runs = true;
@@ -2008,21 +2208,23 @@ static bool
 step_gmu_queues(void)
 {
 	static const uint32_t program[5] = { 0xeaaae5a0, 0xe1a1ebab, 0xa2e0a581, 0xecac82e2, 0x0020edad };
+	uint32_t tcs2_val = board->is_a7xx ? 0x80000000 : 0x80000021;
 
 	if (!cx_ready() || !gmu_runs) {
 		return false;
 	}
-	announce("enable the GPU's part of the always-on sequencer (pdc, 0xb294500 and 0xb294520: a part of the SoC not "
-	    "touched before)");
+	pdc.phys = board->pdc_phys;
+	pdc.size = board->pdc_size;
+	announce("enable the GPU's part of the always-on sequencer (pdc)");
 	get(&pdc, "gpu_enable", PDC_GPU_ENABLE);
 	get(&pdc, "gpu_seq_start_addr", PDC_GPU_SEQ_START_ADDR);
 	put(&pdc, "gpu_seq_start_addr", PDC_GPU_SEQ_START_ADDR, 0);
 	put(&pdc, "gpu_enable", PDC_GPU_ENABLE, 0x80000001);
 	get(&pdc, "gpu_enable", PDC_GPU_ENABLE);
 
-	announce("give the GMU's RPMh channel its sleep and wake program (rscc, 0x3de0000), unless it has it");
+	announce("give the GMU's RPMh channel its sleep and wake program (rscc), unless it has it");
 	if (get(&rscc, "seq_mem_0_drv0", RSCC_SEQ_MEM_0_DRV0) == program[0] &&
-	    get(&rscc, "hidden_tcs_cmd2_data", RSCC_HIDDEN_TCS_CMD0_DATA + 4 * 4) == 0x80000021) {
+	    get(&rscc, "hidden_tcs_cmd2_data", RSCC_HIDDEN_TCS_CMD0_DATA + 4 * 4) == tcs2_val) {
 		goto programmed;
 	}
 	put(&rscc, "rsc_status0_drv0", RSCC_RSC_STATUS0_DRV0, 1u << 24);
@@ -2031,7 +2233,7 @@ step_gmu_queues(void)
 	put(&rscc, "hidden_tcs_cmd0_addr", RSCC_HIDDEN_TCS_CMD0_ADDR, 0);
 	put(&rscc, "hidden_tcs_cmd1_data", RSCC_HIDDEN_TCS_CMD0_DATA + 4 * 2, 0);
 	put(&rscc, "hidden_tcs_cmd1_addr", RSCC_HIDDEN_TCS_CMD0_ADDR + 4 * 2, 0);
-	put(&rscc, "hidden_tcs_cmd2_data", RSCC_HIDDEN_TCS_CMD0_DATA + 4 * 4, 0x80000021);    /* a650 and later */
+	put(&rscc, "hidden_tcs_cmd2_data", RSCC_HIDDEN_TCS_CMD0_DATA + 4 * 4, tcs2_val);
 	put(&rscc, "hidden_tcs_cmd2_addr", RSCC_HIDDEN_TCS_CMD0_ADDR + 4 * 4, 0);
 	put(&rscc, "override_start_addr", RSCC_OVERRIDE_START_ADDR, 0);
 	put(&rscc, "pdc_seq_start_addr", RSCC_PDC_SEQ_START_ADDR, 0x4520);
@@ -2070,11 +2272,33 @@ programmed:
 #define HFI_PERF_TABLE          4
 #define HFI_START               10
 #define HFI_CORE_FW_START       14
+#define HFI_TABLE_MSG           15
+#define HFI_TABLE_GPU_PERF      1
 #define HFI_GX_BW_PERF_VOTE     30
 #define HFI_PREPARE_SLUMBER     33
 #define HFI_ERROR               100
 #define HFI_ANSWER              1               /* in bits 19:16 */
 #define HFI_NO_INDEX            0xff
+
+struct hfi_table_perf {
+	uint32_t header;
+	uint32_t version;
+	uint32_t type;
+	struct {
+		uint32_t count;
+		uint32_t stride;
+		struct {
+			uint32_t vote, cx_vote, khz;
+		} levels[4];
+	} gx;
+	struct {
+		uint32_t count;
+		uint32_t stride;
+		struct {
+			uint32_t vote, khz;
+		} levels[2];
+	} cx;
+};
 
 struct hfi_perf_table {
 	uint32_t header, gpu_levels, gmu_levels;
@@ -2158,7 +2382,7 @@ gmu_data(uint32_t address)
 static void
 gmu_post_mortem(void)
 {
-	uint32_t next = rd(gmu.base + GMU_PWR_COL_CP_RESP) & 0xffff, entries = GMU_LOG_SIZE / 16;
+	uint32_t next = rd(gmu.base + (board->is_a7xx ? GEN7_GMU_GENERAL_9 : GMU_PWR_COL_CP_RESP)) & 0xffff, entries = GMU_LOG_SIZE / 16;
 	const volatile uint32_t *log = (const volatile uint32_t *)gmu_log.memory;
 
 	to_memory(gmu_log.memory, GMU_LOG_SIZE);
@@ -2178,7 +2402,7 @@ gmu_post_mortem(void)
 		    gmu_data(GMU_STATE_ADDRESS + 4 * i + 24), gmu_data(GMU_STATE_ADDRESS + 4 * i + 28));
 	}
 	rscc_show();
-	get(&gpucc, "gx_gdscr", GPUCC_GX_GDSCR);
+	get(&gpucc, "gx_gdscr", board->gpucc_gx_gdscr);
 	get(&gpucc, "gx_sw_reset", GPUCC_GX_SW_RESET);
 	get(&gpucc, "gx_domain_misc", GPUCC_GX_DOMAIN_MISC);
 	get(&gpucc, "pll0 mode", GPUCC_PLL0_MODE);
@@ -2284,12 +2508,17 @@ step_core_power(void)
 {
 	static const struct {
 		uint32_t khz, level;
-	} speeds[] = { { 0, 0 }, { 315000, 64 }, { 450000, 128 }, { 550000, 192 } };
+	} speeds_a6xx[] = { { 0, 0 }, { 315000, 64 }, { 450000, 128 }, { 550000, 192 } };
+	static const struct {
+		uint32_t khz, level;
+	} speeds_a7xx[] = { { 0, 0 }, { 231000, 52 }, { 310000, 56 }, { 422000, 64 } };
 	static struct hfi_perf_table perf;
+	static struct hfi_table_perf table_perf;
 	static struct hfi_bw_table bw;
 	uint32_t core_start[2] = { 0, 0 }, start[1] = { 0 }, vote[4] = { 0, 1, 3, HFI_NO_INDEX }, granted = 0, speed = 0;
 	uint16_t gfx[16], cx[16], mx[16];
 	unsigned gfx_levels, cx_levels, mx_levels;
+	uint32_t num_speeds = 4;
 
 	if (!cx_ready() || !gmu_talks) {
 		return false;
@@ -2299,23 +2528,50 @@ step_core_power(void)
 		printf("adreno: %u: RPMh's list lacks one of the rails\n", step);
 		return false;
 	}
-	perf.gpu_levels = sizeof(speeds) / sizeof(speeds[0]);
-	for (unsigned i = 0; i < perf.gpu_levels; i++) {
-		perf.gpu[i].khz = speeds[i].khz;
-		perf.gpu[i].acd = 0xffffffff;           /* no adaptive clocking */
-		if (!rail_vote(speeds[i].level, gfx, gfx_levels, mx, mx_levels, &perf.gpu[i].vote)) {
-			printf("adreno: %u: RPMh has no level %u for the 3D core's rail\n", step, speeds[i].level);
+	if (board->is_a7xx) {
+		table_perf.version = 0;
+		table_perf.type = HFI_TABLE_GPU_PERF;
+		table_perf.gx.count = 4;
+		table_perf.gx.stride = 3;
+		for (unsigned i = 0; i < 4; i++) {
+			table_perf.gx.levels[i].khz = speeds_a7xx[i].khz;
+			table_perf.gx.levels[i].cx_vote = 0xffffffff;
+			if (!rail_vote(speeds_a7xx[i].level, gfx, gfx_levels, mx, mx_levels, &table_perf.gx.levels[i].vote)) {
+				printf("adreno: %u: RPMh has no level %u for the 3D core's rail\n", step, speeds_a7xx[i].level);
+				return false;
+			}
+		}
+		table_perf.cx.count = 2;
+		table_perf.cx.stride = 2;
+		table_perf.cx.levels[0].khz = 0;
+		table_perf.cx.levels[1].khz = 200000;
+		if (!rail_vote(0, cx, cx_levels, mx, mx_levels, &table_perf.cx.levels[0].vote) ||
+		    !rail_vote(64, cx, cx_levels, mx, mx_levels, &table_perf.cx.levels[1].vote)) {
 			return false;
 		}
+		printf("adreno: %u: votes: 3D core %#x %#x %#x %#x, GMU %#x %#x\n", step,
+		    table_perf.gx.levels[0].vote, table_perf.gx.levels[1].vote,
+		    table_perf.gx.levels[2].vote, table_perf.gx.levels[3].vote,
+		    table_perf.cx.levels[0].vote, table_perf.cx.levels[1].vote);
+	} else {
+		perf.gpu_levels = sizeof(speeds_a6xx) / sizeof(speeds_a6xx[0]);
+		for (unsigned i = 0; i < perf.gpu_levels; i++) {
+			perf.gpu[i].khz = speeds_a6xx[i].khz;
+			perf.gpu[i].acd = 0xffffffff;           /* no adaptive clocking */
+			if (!rail_vote(speeds_a6xx[i].level, gfx, gfx_levels, mx, mx_levels, &perf.gpu[i].vote)) {
+				printf("adreno: %u: RPMh has no level %u for the 3D core's rail\n", step, speeds_a6xx[i].level);
+				return false;
+			}
+		}
+		perf.gmu_levels = 2;
+		perf.gmu[1].khz = 200000;
+		if (!rail_vote(0, cx, cx_levels, mx, mx_levels, &perf.gmu[0].vote) ||
+		    !rail_vote(48, cx, cx_levels, mx, mx_levels, &perf.gmu[1].vote)) {  /* "minimum SVS", the vendor's choice */
+			return false;
+		}
+		printf("adreno: %u: votes: 3D core %#x %#x %#x %#x, GMU %#x %#x\n", step, perf.gpu[0].vote, perf.gpu[1].vote,
+		    perf.gpu[2].vote, perf.gpu[3].vote, perf.gmu[0].vote, perf.gmu[1].vote);
 	}
-	perf.gmu_levels = 2;
-	perf.gmu[1].khz = 200000;
-	if (!rail_vote(0, cx, cx_levels, mx, mx_levels, &perf.gmu[0].vote) ||
-	    !rail_vote(48, cx, cx_levels, mx, mx_levels, &perf.gmu[1].vote)) {  /* "minimum SVS", the vendor's choice */
-		return false;
-	}
-	printf("adreno: %u: votes: 3D core %#x %#x %#x %#x, GMU %#x %#x\n", step, perf.gpu[0].vote, perf.gpu[1].vote,
-	    perf.gpu[2].vote, perf.gpu[3].vote, perf.gmu[0].vote, perf.gmu[1].vote);
 
 	bw.levels = 1;
 	bw.ddr_commands = 3;
@@ -2335,15 +2591,23 @@ step_core_power(void)
 		return false;
 	}
 
-	if (PE_parse_boot_argn("adreno_speed", &speed, sizeof(speed)) && speed >= 1 && speed < perf.gpu_levels) {
+	if (PE_parse_boot_argn("adreno_speed", &speed, sizeof(speed)) && speed >= 1 && speed < num_speeds) {
 		vote[2] = speed;
 	}
-	core_khz = speeds[vote[2]].khz;
+	core_khz = board->is_a7xx ? speeds_a7xx[vote[2]].khz : speeds_a6xx[vote[2]].khz;
 	printf("adreno: %u: the speed wanted: %u MHz\n", step, core_khz / 1000);
 	announce("send the GMU its tables (speeds and supply levels, bus votes), \"start\", and the speed wanted; "
 	    "from here on it casts votes in RPMh by itself");
-	if (!hfi_send("the table of speeds", HFI_PERF_TABLE, &perf.header, sizeof(perf) / 4) ||
-	    !hfi_send("the table of bus votes", HFI_BW_TABLE, &bw.header, sizeof(bw) / 4) ||
+	if (board->is_a7xx) {
+		if (!hfi_send("the table of speeds", HFI_TABLE_MSG, &table_perf.header, sizeof(table_perf) / 4)) {
+			return false;
+		}
+	} else {
+		if (!hfi_send("the table of speeds", HFI_PERF_TABLE, &perf.header, sizeof(perf) / 4)) {
+			return false;
+		}
+	}
+	if (!hfi_send("the table of bus votes", HFI_BW_TABLE, &bw.header, sizeof(bw) / 4) ||
 	    !hfi_send("\"start the core firmware\"", HFI_CORE_FW_START, core_start, 2) ||
 	    !hfi_send("the speed wanted", HFI_GX_BW_PERF_VOTE, vote, 4)) {
 		return false;
@@ -2351,7 +2615,7 @@ step_core_power(void)
 
 	announce("ask the GMU to power the 3D core and keep it powered");
 	get(&gmu, "sptprac_pwr_clk_status", GMU_SPTPRAC_PWR_CLK_STATUS);
-	get(&gpucc, "gx_gdscr", GPUCC_GX_GDSCR);
+	get(&gpucc, "gx_gdscr", board->gpucc_gx_gdscr);
 	put(&gmu, "host2gmu_intr_set", GMU_HOST2GMU_INTR_SET, GMU_CORE_REQUEST);
 	for (int i = 0; i < 5000 && !(granted & GMU_CORE_GRANTED); i++) {
 		sleep_us(100);
@@ -2360,7 +2624,7 @@ step_core_power(void)
 	core_is_on = true;                      /* asked for, at least: to be given back */
 	put(&gmu, "gmu2host_intr_clr", GMU_GMU2HOST_INTR_CLR, GMU_CORE_GRANTED);
 	get(&gmu, "sptprac_pwr_clk_status", GMU_SPTPRAC_PWR_CLK_STATUS);
-	get(&gpucc, "gx_gdscr", GPUCC_GX_GDSCR);
+	get(&gpucc, "gx_gdscr", board->gpucc_gx_gdscr);
 	get(&gmu, "rpmh_power_state", GMU_RPMH_POWER_STATE);
 	if (!(granted & GMU_CORE_GRANTED) || (rd(gmu.base + GMU_SPTPRAC_PWR_CLK_STATUS) & 0xc0) != 0) {
 		printf("adreno: %u: the GMU does not power the 3D core (gmu2host_intr_info %#x, fw_init_result %#x)\n", step,
@@ -2371,8 +2635,12 @@ step_core_power(void)
 	if (!hfi_send("\"start\"", HFI_START, start, 1)) {
 		return false;
 	}
-	printf("adreno: %u: measured: the 3D core's clock runs at %u Hz (%u MHz was asked for), the GMU's in it at %u Hz\n", step,
-	    measure_quietly(GPUCC_DEBUG_GX_GFX3D), core_khz / 1000, measure_quietly(GPUCC_DEBUG_GX_GMU));
+	if (!board->is_a7xx) {
+		printf("adreno: %u: measured: the 3D core's clock runs at %u Hz (%u MHz was asked for), the GMU's in it at %u Hz\n", step,
+		    measure_quietly(GPUCC_DEBUG_GX_GFX3D), core_khz / 1000, measure_quietly(GPUCC_DEBUG_GX_GMU));
+	} else {
+		printf("adreno: %u: the 3D core was asked for %u MHz\n", step, core_khz / 1000);
+	}
 
 	announce("read registers of the 3D core itself (0x3d00000): the first time it has power");
 	get(&gpu, "rbbm_status", RBBM_STATUS);
@@ -2563,8 +2831,8 @@ step_core_space(void)
 		return false;
 	}
 	PE_parse_boot_argn("adreno_stream1", &stream1, sizeof(stream1));
-	announce("make the 3D core's memory: its ring, its microcode (fw/a660_sqe.fw), a page to try writing to");
-	microcode = image_file("fw", "a660_sqe.fw", &size);
+	announce("make the 3D core's memory: its ring, its microcode, a page to try writing to");
+	microcode = image_file("fw", board->sqe_fw_name, &size);
 	if (microcode == NULL || size < 8 || size > 0x40000 ||
 	    !block_new(&core_space, &core_ring, CORE_RING_ADDRESS, CORE_RING_SIZE, PTE_CORE) ||
 	    !block_new(&core_space, &core_sqe, CORE_SQE_ADDRESS, (uint32_t)size - 4, PTE_CORE | PTE_READ_ONLY) ||
@@ -2648,7 +2916,7 @@ step_zap_load(void)
 	announce("ask TrustZone to give up a zap shader that a kernel before this one may have left");
 	printf("adreno: %u: %s\n", step, zap_unload() ? "TrustZone has given up what it had (it says so with none, too)" :
 	    "TRUSTZONE DOES NOT GIVE IT UP: the next answers tell whether it keeps one");
-	segment = image_file("fw", "a660_zap.b02", &size);
+	segment = image_file("fw", board->zap_b02_name, &size);
 	if (segment == NULL || size == 0 || size > 0x1000) {
 		return false;
 	}
@@ -2664,7 +2932,7 @@ step_zap_load(void)
 		zap_is_loaded = true;
 		return true;
 	}
-	if (scm("where the image will be", SCM_64 | SCM_SIP | SCM_PAS_MEM_SETUP, SCM_THREE_VALUES, PAS_GPU, ZAP_MEMORY, 0x1000,
+	if (scm("where the image will be", SCM_64 | SCM_SIP | SCM_PAS_MEM_SETUP, SCM_THREE_VALUES, PAS_GPU, board->zap_memory, 0x1000,
 	    &answer) != 0 || answer != 0) {
 		printf("adreno: %u: TrustZone does not take the place (%#llx): TAKEN TO MEAN THAT IT KEEPS A ZAP SHADER FROM "
 		    "BEFORE, which is used as it is\n", step, answer);
@@ -2672,11 +2940,11 @@ step_zap_load(void)
 		return true;
 	}
 	/* (the memory is looked at only now: TrustZone has just said that it is not its own) */
-	memory = (volatile uint8_t *)ml_io_map_wcomb(ZAP_MEMORY, ZAP_MEMORY_SIZE);
+	memory = (volatile uint8_t *)ml_io_map_wcomb(board->zap_memory, ZAP_MEMORY_SIZE);
 	printf("adreno: %u: the reserved memory begins %02x %02x %02x %02x, the zap shader %02x %02x %02x %02x\n", step,
 	    memory[0], memory[1], memory[2], memory[3], segment[0], segment[1], segment[2], segment[3]);
-	printf("adreno: %u: about to write %llu bytes at %#llx\n", step, size, ZAP_MEMORY);
-	snprintf(last_write, sizeof(last_write), "step %u wrote the zap shader into memory at %#llx", step, ZAP_MEMORY);
+	printf("adreno: %u: about to write %llu bytes at %#llx\n", step, size, board->zap_memory);
+	snprintf(last_write, sizeof(last_write), "step %u wrote the zap shader into memory at %#llx", step, board->zap_memory);
 	hold(true);
 	for (uint64_t i = 0; i < 0x1000; i++) {
 		memory[i] = i < size ? segment[i] : 0;
@@ -2711,42 +2979,69 @@ step_core_start(void)
 	put(&gpu, "rbbm_secvid_tsb_cntl", RBBM_SECVID_TSB_CNTL, 0);
 	put64(&gpu, "rbbm_secvid_tsb_trusted_base", RBBM_SECVID_TSB_TRUSTED_BASE, 0);
 	put(&gpu, "rbbm_secvid_tsb_trusted_size", RBBM_SECVID_TSB_TRUSTED_SIZE, 0);
-	for (unsigned i = 0; i < sizeof(address_modes) / sizeof(address_modes[0]); i++) {
-		put(&gpu, "address mode: 64 bits", GPU_WORD(address_modes[i]), 1);
+	if (!board->is_a7xx) {
+		for (unsigned i = 0; i < sizeof(address_modes) / sizeof(address_modes[0]); i++) {
+			put(&gpu, "address mode: 64 bits", GPU_WORD(address_modes[i]), 1);
+		}
 	}
 	for (unsigned i = 0; i < 4; i++) {
 		put(&gbif, "qsb_side", GBIF_QSB_SIDE0 + 4 * i, 0x00071620);
 	}
-	put(&gpu, "rbbm_gbif_client_qos_cntl", RBBM_GBIF_CLIENT_QOS_CNTL, 3);
+	if (board->is_a7xx) {
+		put(&gpu, "rbbm_gbif_client_qos_cntl", RBBM_GBIF_CLIENT_QOS_CNTL, 0x02120212);
+	} else {
+		put(&gpu, "rbbm_gbif_client_qos_cntl", RBBM_GBIF_CLIENT_QOS_CNTL, 3);
+	}
 	put(&gpu, "rbbm_perfctr_gpu_busy_masked", RBBM_PERFCTR_GPU_BUSY_MASKED, 0xffffffff);
-	put64(&gpu, "uche_write_range_max", UCHE_WRITE_RANGE_MAX, 0x0001ffffffffffc0ull);
+	if (!board->is_a7xx) {
+		put64(&gpu, "uche_write_range_max", UCHE_WRITE_RANGE_MAX, 0x0001ffffffffffc0ull);
+	}
 	put64(&gpu, "uche_trap_base", UCHE_TRAP_BASE, 0x0001fffffffff000ull);
 	put64(&gpu, "uche_write_thru_base", UCHE_WRITE_THRU_BASE, 0x0001fffffffff000ull);
-	put(&gpu, "uche_filter_cntl", UCHE_FILTER_CNTL, 0x804);
-	put(&gpu, "uche_cache_ways", UCHE_CACHE_WAYS, 0x4);
-	put(&gpu, "cp_roq_thresholds_2", CP_ROQ_THRESHOLDS_2, 0x02000140);
-	put(&gpu, "cp_roq_thresholds_1", CP_ROQ_THRESHOLDS_1, 0x8040362c);
-	put(&gpu, "cp_lpac_prog_fifo_size", CP_LPAC_PROG_FIFO_SIZE, 0x20);
-	put(&gpu, "cp_mem_pool_size", CP_MEM_POOL_SIZE, 128);
-	put(&gpu, "pc_dbg_eco_cntl", PC_DBG_ECO_CNTL, 0x00200200);
+	if (board->is_a7xx) {
+		put(&gpu, "uche_cache_ways", UCHE_CACHE_WAYS, 0x800000);
+	} else {
+		put(&gpu, "uche_filter_cntl", UCHE_FILTER_CNTL, 0x804);
+		put(&gpu, "uche_cache_ways", UCHE_CACHE_WAYS, 0x4);
+		put(&gpu, "cp_roq_thresholds_2", CP_ROQ_THRESHOLDS_2, 0x02000140);
+		put(&gpu, "cp_roq_thresholds_1", CP_ROQ_THRESHOLDS_1, 0x8040362c);
+		put(&gpu, "cp_lpac_prog_fifo_size", CP_LPAC_PROG_FIFO_SIZE, 0x20);
+		put(&gpu, "cp_mem_pool_size", CP_MEM_POOL_SIZE, 128);
+		put(&gpu, "pc_dbg_eco_cntl", PC_DBG_ECO_CNTL, 0x00200200);
+	}
 	put(&gpu, "cp_ahb_cntl", CP_AHB_CNTL, 1);
 	/*
 	 * How textures in the GPU's own tiled and compressed layouts are laid out in memory (Linux's
 	 * a6xx_calc_ubwc_config, a6xx_set_ubwc_config for this GPU: highest bank bit 14, and the
 	 * rest as below); Mesa is told the same (hakios_gpu_parameter()).
 	 */
-	put(&gpu, "rb_nc_mode_cntl", GPU_WORD(0x8e08), 1u << 11 | 1u << 4 | 1u << 1);
-	put(&gpu, "tpl1_nc_mode_cntl", GPU_WORD(0xb604), 1u << 1);
-	put(&gpu, "sp_nc_mode_cntl", GPU_WORD(0xae02), 2u << 4 | 1u << 1);
-	put(&gpu, "uche_mode_cntl", GPU_WORD(0x0e01), 1u << 21);
+	if (board->is_a7xx) {
+		put(&gpu, "rb_nc_mode_cntl", GPU_WORD(0x8e08), (1u << 11) | (1u << 4) | (3u << 1));
+		put(&gpu, "tpl1_nc_mode_cntl", GPU_WORD(0xb604), (3u << 1));
+		put(&gpu, "sp_nc_mode_cntl", GPU_WORD(0xae02), (2u << 4) | (3u << 1));
+		put(&gpu, "uche_mode_cntl", GPU_WORD(0x0e01), (3u << 21));
+	} else {
+		put(&gpu, "rb_nc_mode_cntl", GPU_WORD(0x8e08), 1u << 11 | 1u << 4 | 1u << 1);
+		put(&gpu, "tpl1_nc_mode_cntl", GPU_WORD(0xb604), 1u << 1);
+		put(&gpu, "sp_nc_mode_cntl", GPU_WORD(0xae02), 2u << 4 | 1u << 1);
+		put(&gpu, "uche_mode_cntl", GPU_WORD(0x0e01), 1u << 21);
+	}
 	put(&gpu, "rbbm_nc_mode_cntl", GPU_WORD(0x0534), 1);
 	put(&gpu, "rbbm_perfctr_cntl", RBBM_PERFCTR_CNTL, 1);
-	put(&gpu, "rbbm_interface_hang_int_cntl", RBBM_INTERFACE_HANG_INT_CNTL, 1u << 30 | 0x1fffff);
+	if (board->is_a7xx) {
+		put(&gpu, "rbbm_interface_hang_int_cntl", RBBM_INTERFACE_HANG_INT_CNTL, 1u << 30 | 0xcfffff);
+	} else {
+		put(&gpu, "rbbm_interface_hang_int_cntl", RBBM_INTERFACE_HANG_INT_CNTL, 1u << 30 | 0x1fffff);
+	}
 	put(&gpu, "uche_client_pf", UCHE_CLIENT_PF, 1u << 7 | 1);
 	put(&gpu, "cp_chicken_dbg", CP_CHICKEN_DBG, 1);
-	put(&gpu, "rbbm_gbif_client_qos_cntl", RBBM_GBIF_CLIENT_QOS_CNTL, 0);
-	put(&gpu, "cp_apriv_cntl", CP_APRIV_CNTL, 1u << 6 | 1u << 5 | 1u << 3 | 1u << 2 | 1u << 1);
-	put(&gpu, "rb_dbg_eco_cntl", RB_DBG_ECO_CNTL, 0x04100000);     /* Mesa's value for this GPU */
+	if (!board->is_a7xx) {
+		put(&gpu, "rbbm_gbif_client_qos_cntl", RBBM_GBIF_CLIENT_QOS_CNTL, 0);
+	}
+	put(&gpu, "cp_apriv_cntl", CP_APRIV_CNTL, 1u << 6 | 1u << 5 | 1u << 3 | 1u << 2 | 1u << 1 | (board->is_a7xx ? 1u : 0));
+	if (!board->is_a7xx) {
+		put(&gpu, "rb_dbg_eco_cntl", RB_DBG_ECO_CNTL, 0x04100000);     /* Mesa's value for this GPU */
+	}
 	/*
 	 * adreno_blind=1: the command processor is started with its microcode at an address where
 	 * nothing is. All it can do then is ask the SMMU for it, and the SMMU's record of the refusal
@@ -2786,15 +3081,28 @@ step_core_start(void)
 	}
 
 	announce("give the 3D core its first command, \"initialize\"");
-	ring_command(CP_ME_INIT, 8);            /* a6xx_cp_init */
-	ring(0x0000002f);
-	ring(0x00000003);                       /* several hardware contexts */
-	ring(0x20000000);                       /* error detection */
-	ring(0);
-	ring(0);
-	ring(0);
-	ring(0);
-	ring(0);
+	if (board->is_a7xx) {
+		ring_command(0x17 /* CP_THREAD_CONTROL */, 1);
+		ring(1u << 27);
+		ring_command(CP_ME_INIT, 7);
+		ring(0x84b);
+		ring(0x00000003);                       /* several hardware contexts */
+		ring(0x20000000);                       /* error detection */
+		ring(0x00000002);
+		ring(0);
+		ring(0);
+		ring(0);
+	} else {
+		ring_command(CP_ME_INIT, 8);            /* a6xx_cp_init */
+		ring(0x0000002f);
+		ring(0x00000003);                       /* several hardware contexts */
+		ring(0x20000000);                       /* error detection */
+		ring(0);
+		ring(0);
+		ring(0);
+		ring(0);
+		ring(0);
+	}
 	if (!ring_run("initialize its command processor")) {
 		return false;
 	}
@@ -2962,12 +3270,12 @@ step_frame(void)
 static void
 gx_off(void)
 {
-	uint32_t gx = get(&gpucc, "gx_gdscr", GPUCC_GX_GDSCR);
+	uint32_t gx = get(&gpucc, "gx_gdscr", board->gpucc_gx_gdscr);
 
 	if (gx & GDSC_POWER_ON) {
-		put(&gpucc, "gx_gdscr", GPUCC_GX_GDSCR, gx | GDSC_SW_COLLAPSE);
-		wait_for(&gpucc, GPUCC_GX_GDSCR, GDSC_POWER_ON, 0, 100);
-		get(&gpucc, "gx_gdscr", GPUCC_GX_GDSCR);
+		put(&gpucc, "gx_gdscr", board->gpucc_gx_gdscr, gx | GDSC_SW_COLLAPSE);
+		wait_for(&gpucc, board->gpucc_gx_gdscr, GDSC_POWER_ON, 0, 100);
+		get(&gpucc, "gx_gdscr", board->gpucc_gx_gdscr);
 	}
 }
 
@@ -2975,29 +3283,33 @@ gx_off(void)
 static void
 stale_stop(void)
 {
-	need(&gmu);
-	need(&rscc);
-	put(&gmu, "cm3_sysreset", GMU_CM3_SYSRESET, 1);
+	if (!board->is_a7xx) {
+		need(&gmu);
+		need(&rscc);
+		put(&gmu, "cm3_sysreset", GMU_CM3_SYSRESET, 1);
+	}
 	gx_off();
-	if (rd(rscc.base + RSCC_SEQ_MEM_0_DRV0) == 0xeaaae5a0 && !(rd(rscc.base + RSCC_RSC_STATUS0_DRV0) & RSCC_ASLEEP)) {
+	if (!board->is_a7xx && rd(rscc.base + RSCC_SEQ_MEM_0_DRV0) == 0xeaaae5a0 && !(rd(rscc.base + RSCC_RSC_STATUS0_DRV0) & RSCC_ASLEEP)) {
 		put(&gmu, "rscc_control_req", GMU_RSCC_CONTROL_REQ, 1);
 		wait_for(&rscc, RSCC_RSC_STATUS0_DRV0, RSCC_ASLEEP, RSCC_ASLEEP, 100);
 		get(&rscc, "rsc_status0_drv0", RSCC_RSC_STATUS0_DRV0);
 		put(&gmu, "rscc_control_req", GMU_RSCC_CONTROL_REQ, 0);
 	}
-	if (smmu_layout()) {
+	if (!board->is_a7xx && smmu_layout()) {
 		for (uint32_t match = 0; match < 3; match++) {
 			put(&smmu, "smr", SMMU_SMR(match), 0);
 			put(&smmu, "s2cr", SMMU_S2CR(match), SMMU_S2CR_FAULT);
 			put(&smmu, "cb sctlr", (smmu_pages + match) * smmu_page + SMMU_CB_SCTLR, 0);
 		}
 	}
-	put(&gpucc, "cx_gdscr", GPUCC_CX_GDSCR, rd(gpucc.base + GPUCC_CX_GDSCR) | GDSC_SW_COLLAPSE);
+	put(&gpucc, "cx_gdscr", board->gpucc_cx_gdscr, rd(gpucc.base + board->gpucc_cx_gdscr) | GDSC_SW_COLLAPSE);
 	for (int i = 0; i < 1000 && cx_is_on(); i++) {
 		sleep_us(100);
 	}
-	get(&gpucc, "cx_gdscr", GPUCC_CX_GDSCR);
-	get(&gpucc, "cx_hw_ctrl", GPUCC_CX_HW_CTRL);
+	get(&gpucc, "cx_gdscr", board->gpucc_cx_gdscr);
+	if (!board->is_a7xx) {
+		get(&gpucc, "cx_hw_ctrl", GPUCC_CX_HW_CTRL);
+	}
 }
 
 /*
@@ -3060,10 +3372,10 @@ gpu_block_stop(void)
 			get(&gmu, "ao_gpu_cx_busy_status", GMU_AO_GPU_CX_BUSY_STATUS);
 		}
 		get(&gmu, "sptprac_pwr_clk_status", GMU_SPTPRAC_PWR_CLK_STATUS);
-		get(&gpucc, "gx_gdscr", GPUCC_GX_GDSCR);
+		get(&gpucc, "gx_gdscr", board->gpucc_gx_gdscr);
 		gmu_talks = false;
 	}
-	if (gmu_runs) {
+	if (gmu_runs && !board->is_a7xx) {
 		put(&gmu, "cm3_sysreset", GMU_CM3_SYSRESET, 1);
 		gmu_runs = false;
 		gx_off();                               /* (a GMU that has slumbered has done it itself) */
@@ -3111,12 +3423,14 @@ gpu_block_stop(void)
 	 * a6xx_gmu_suspend). The switch takes votes; ours is all this withdraws.
 	 */
 	if (power_off && gpucc_answers()) {
-		put(&gpucc, "cx_gdscr", GPUCC_CX_GDSCR, rd(gpucc.base + GPUCC_CX_GDSCR) | GDSC_SW_COLLAPSE);
+		put(&gpucc, "cx_gdscr", board->gpucc_cx_gdscr, rd(gpucc.base + board->gpucc_cx_gdscr) | GDSC_SW_COLLAPSE);
 		for (int i = 0; i < 1000 && cx_is_on(); i++) {
 			sleep_us(100);
 		}
-		get(&gpucc, "cx_gdscr", GPUCC_CX_GDSCR);
-		get(&gpucc, "cx_hw_ctrl", GPUCC_CX_HW_CTRL);
+		get(&gpucc, "cx_gdscr", board->gpucc_cx_gdscr);
+		if (!board->is_a7xx) {
+			get(&gpucc, "cx_hw_ctrl", GPUCC_CX_HW_CTRL);
+		}
 		cx_off = !cx_is_on();
 	}
 }
@@ -3716,7 +4030,7 @@ extern vm_offset_t pe_arm_get_soc_base_phys(void);
 static bool
 start_by_itself(void)
 {
-	static const char *const files[] = { "a660_gmu.bin", "a660_sqe.fw", "a660_zap.mdt", "a660_zap.b02" };
+	const char *const files[] = { board->gmu_fw_name, board->sqe_fw_name, board->zap_fw_name, board->zap_b02_name };
 	const char *missing = NULL;
 	uint64_t size;
 
@@ -3753,8 +4067,26 @@ hakios_adreno_init(void)
 		"the GMU's address space", "the GMU's firmware", "the GMU's start", "the GMU's message queues", "the 3D core's power",
 		"the 3D core's address space", "the zap shader", "the 3D core's start", "the 3D core's first commands", "a frame"
 	};
-	uint32_t only = 0, done = 0, failed = 0, keep = 0;
+	uint32_t only = 0, done = 0, failed = 0, keep = 0, bsel = 1;
 	bool by_itself = false;
+
+	PE_parse_boot_argn("adreno_board", &bsel, sizeof(bsel));
+	if (bsel == 0) {
+		board = &board_redwood;
+	} else {
+		board = &board_corvette;
+	}
+	qfprom.phys = board->qfprom_phys;
+	qfprom.size = board->qfprom_size;
+	gpucc.phys = board->gpucc_phys;
+	gpucc.size = board->gpucc_size;
+	gmu.phys = board->gmu_phys;
+	gmu.size = board->gmu_size;
+	rscc.phys = board->rscc_phys;
+	rscc.size = board->rscc_size;
+	smmu.phys = board->smmu_phys;
+	smmu.size = board->smmu_size;
+	cmd_db = NULL;
 
 	if (PE_parse_boot_argn("display_probe", &only, sizeof(only)) && only) {
 		display_probe();
