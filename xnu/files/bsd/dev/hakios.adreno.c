@@ -350,8 +350,8 @@ static const struct adreno_board board_redwood = {
 	.is_a7xx = false,
 };
 
-static const struct adreno_board board_corvette = {
-	.name = "corvette/giulia (SM8650 / Adreno 750)",
+static const struct adreno_board board_giulia = {
+	.name = "giulia (OnePlus 13R, SM8650 / Adreno 750)",
 	.cmd_db_phys = 0x81c60000UL,
 	.cmd_db_size = 0x20000UL,
 	.qfprom_phys = 0x221c2000UL,
@@ -388,7 +388,7 @@ static const struct adreno_board board_corvette = {
 	.is_a7xx = true,
 };
 
-static const struct adreno_board *board = &board_corvette;
+static const struct adreno_board *board = &board_giulia;
 
 /* ---- step 1: the clocks from outside, and RPMh's names ------------------------------------------------ */
 
@@ -4074,7 +4074,7 @@ hakios_adreno_init(void)
 	if (bsel == 0) {
 		board = &board_redwood;
 	} else {
-		board = &board_corvette;
+		board = &board_giulia;
 	}
 	qfprom.phys = board->qfprom_phys;
 	qfprom.size = board->qfprom_size;

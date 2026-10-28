@@ -54,14 +54,125 @@ tell(const char *format, ...)
 	}
 }
 
-#define EPSS_PHYS               0x18591000UL    /* three groups ("domains") of 0x1000: small cores, big, biggest */
 #define EPSS_DOMAIN_SIZE        0x1000UL
-#define EPSS_DOMAINS            3
 #define EPSS_FREQ_TABLE         0x100           /* a word per row: [31:30] clock source, [7:0] multiple of 19.2 MHz */
 #define EPSS_TABLE_ROWS         40
 #define EPSS_PERF_STATE         0x320           /* the row that is wanted */
 #define XO_KHZ                  19200
 #define ALTERNATE_KHZ           300000          /* source 0: a fixed 300 MHz */
+
+struct rsc_layout {
+	uint32_t irq_enable;
+	uint32_t irq_status;
+	uint32_t irq_clear;
+	uint32_t wait;
+	uint32_t control;
+	uint32_t status;
+	uint32_t cmd_enable;
+	uint32_t cmd_msgid;
+	uint32_t cmd_addr;
+	uint32_t cmd_data;
+	uint32_t cmd_status;
+	uint32_t cmd_resp;
+	uint32_t cmd_stride;
+	uint32_t tcs_stride;
+};
+
+static const struct rsc_layout rsc_layout_v2_7 = {
+	.irq_enable = 0x00,
+	.irq_status = 0x04,
+	.irq_clear = 0x08,
+	.wait = 0x10,
+	.control = 0x14,
+	.status = 0x18,
+	.cmd_enable = 0x1c,
+	.cmd_msgid = 0x30,
+	.cmd_addr = 0x34,
+	.cmd_data = 0x38,
+	.cmd_status = 0x3c,
+	.cmd_resp = 0x40,
+	.cmd_stride = 20,
+	.tcs_stride = 0x2a0,
+};
+
+static const struct rsc_layout rsc_layout_v3 = {
+	.irq_enable = 0x00,
+	.irq_status = 0x04,
+	.irq_clear = 0x08,
+	.wait = 0x20,
+	.control = 0x24,
+	.status = 0x28,
+	.cmd_enable = 0x2c,
+	.cmd_msgid = 0x34,
+	.cmd_addr = 0x38,
+	.cmd_data = 0x3c,
+	.cmd_status = 0x40,
+	.cmd_resp = 0x44,
+	.cmd_stride = 24,
+	.tcs_stride = 0x2a0,
+};
+
+static uint32_t
+domain_of_redwood(uint32_t phys_id)
+{
+	uint32_t core = (phys_id >> 8) & 0xff;
+
+	return core < 4 ? 0 : core < 7 ? 1 : 2;
+}
+
+static uint32_t
+domain_of_giulia(uint32_t phys_id)
+{
+	uint32_t core = (phys_id >> 8) & 0xff;
+
+	switch (core) {
+	case 0:
+	case 1:
+		return 0;
+	case 2:
+	case 3:
+	case 4:
+		return 3;
+	case 5:
+	case 6:
+		return 1;
+	case 7:
+	default:
+		return 2;
+	}
+}
+
+struct cpufreq_board {
+	const char *name;
+	uint32_t epss_phys;
+	uint32_t epss_domains;
+	uint32_t rsc_phys;
+	uint32_t cmd_db_phys;
+	const struct rsc_layout *rsc_regs;
+	uint32_t (*domain_of)(uint32_t phys_id);
+};
+
+static const struct cpufreq_board board_redwood = {
+	.name = "redwood (SM7325)",
+	.epss_phys = 0x18591000UL,
+	.epss_domains = 3,
+	.rsc_phys = 0x18220000UL,
+	.cmd_db_phys = 0x80860000UL,
+	.rsc_regs = &rsc_layout_v2_7,
+	.domain_of = domain_of_redwood,
+};
+
+static const struct cpufreq_board board_giulia = {
+	.name = "giulia (OnePlus 13R, SM8650)",
+	.epss_phys = 0x17D91000UL,
+	.epss_domains = 4,
+	.rsc_phys = 0x17A20000UL,
+	.cmd_db_phys = 0x81C60000UL,
+	.rsc_regs = &rsc_layout_v3,
+	.domain_of = domain_of_giulia,
+};
+
+static const struct cpufreq_board *board = &board_giulia;
 
 /* How fast a simple loop runs, in thousands of iterations per millisecond. */
 static uint32_t
@@ -77,22 +188,13 @@ loop_speed(void)
 	return nanos ? (uint32_t)(2000000ULL * 1000 / nanos) : 0;
 }
 
-/* The group of the core with that number in its MPIDR (the device tree's "reg": the number is the second field). */
-static uint32_t
-domain_of(uint32_t phys_id)
-{
-	uint32_t core = (phys_id >> 8) & 0xff;
-
-	return core < 4 ? 0 : core < 7 ? 1 : 2;
-}
-
 static void
 raise_domain(uint32_t domain, uint32_t cores)
 {
 	uint32_t top = 0, top_khz = 0, was;
 	vm_offset_t base;
 
-	base = ml_io_map(EPSS_PHYS + domain * EPSS_DOMAIN_SIZE, EPSS_DOMAIN_SIZE);
+	base = ml_io_map(board->epss_phys + domain * EPSS_DOMAIN_SIZE, EPSS_DOMAIN_SIZE);
 	for (uint32_t row = 0; row < EPSS_TABLE_ROWS; row++) {
 		uint32_t entry = *(volatile uint32_t *)(base + EPSS_FREQ_TABLE + 4 * row);
 		uint32_t khz = (entry >> 30) ? XO_KHZ * (entry & 0xff) : ALTERNATE_KHZ;
@@ -345,7 +447,7 @@ static void
 ddr_look(void)
 {
 	/* (memory, not registers: mapped so that reads of any size and alignment are allowed) */
-	const struct cmd_db_header *db = (const struct cmd_db_header *)ml_io_map_wcomb(CMD_DB_PHYS, CMD_DB_SIZE);
+	const struct cmd_db_header *db = (const struct cmd_db_header *)ml_io_map_wcomb(board->cmd_db_phys, CMD_DB_SIZE);
 
 	if (db->magic[0] != 0xdb || db->magic[1] != 0x30 || db->magic[2] != 0x03 || db->magic[3] != 0x0c) {
 		tell("ddr: no command database\n");
@@ -378,24 +480,24 @@ ddr_look(void)
  * each (sc7280's qcom,tcs-config): every command with an address, and which of them go to the BCMs
  * above -- the bandwidth it asked for, and that is in force whenever the processors are awake.
  */
-#define RSC_PHYS                0x18220000UL
 #define RSC_SIZE                0x10000UL
-#define RSC_TCS(n, reg)         (0xd00 + 0x2a0 * (n) + (reg))
 #define RSC_TCS_COUNT           9
 #define RSC_CMDS                16
 
 static void
 ddr_slots(void)
 {
-	vm_offset_t rsc = ml_io_map(RSC_PHYS, RSC_SIZE);
+	vm_offset_t rsc = ml_io_map(board->rsc_phys, RSC_SIZE);
+	const struct rsc_layout *l = board->rsc_regs;
 
 	for (unsigned t = 0; t < RSC_TCS_COUNT; t++) {
-		uint32_t enabled = *(volatile uint32_t *)(rsc + RSC_TCS(t, 0x1c));
+		vm_offset_t tcs = rsc + 0xd00 + l->tcs_stride * t;
+		uint32_t enabled = *(volatile uint32_t *)(tcs + l->cmd_enable);
 
 		for (unsigned c = 0; c < RSC_CMDS; c++) {
-			uint32_t msgid = *(volatile uint32_t *)(rsc + RSC_TCS(t, 0x30 + 20 * c));
-			uint32_t address = *(volatile uint32_t *)(rsc + RSC_TCS(t, 0x34 + 20 * c));
-			uint32_t data = *(volatile uint32_t *)(rsc + RSC_TCS(t, 0x38 + 20 * c));
+			uint32_t msgid = *(volatile uint32_t *)(tcs + l->cmd_msgid + l->cmd_stride * c);
+			uint32_t address = *(volatile uint32_t *)(tcs + l->cmd_addr + l->cmd_stride * c);
+			uint32_t data = *(volatile uint32_t *)(tcs + l->cmd_data + l->cmd_stride * c);
 
 			if (address == 0 && data == 0) {
 				continue;
@@ -427,7 +529,6 @@ ddr_slots(void)
 #define BCM_COMMIT              (1u << 30)
 #define BCM_VALID               (1u << 29)
 #define BCM_VOTE(x, y)          (BCM_COMMIT | BCM_VALID | ((uint32_t)(x) & 0x3fff) << 14 | ((uint32_t)(y) & 0x3fff))
-#define TCS_REG(reg)            (ddr_rsc + 0xd00 + (reg))       /* command slot set 0, an "active" one */
 #define BCM_ACV_APPS            8
 #define DDR_REST                1024            /* the vote left for the loader (ddr_rest=N); see hakios_ddr_quiesce() */
 
@@ -438,7 +539,7 @@ static bool ddr_voted;
 static uint32_t
 cmd_db_address(const char *name)
 {
-	const struct cmd_db_header *db = (const struct cmd_db_header *)ml_io_map_wcomb(CMD_DB_PHYS, CMD_DB_SIZE);
+	const struct cmd_db_header *db = (const struct cmd_db_header *)ml_io_map_wcomb(board->cmd_db_phys, CMD_DB_SIZE);
 	char id[8] = { 0 };
 
 	if (db->magic[0] != 0xdb || db->magic[1] != 0x30 || db->magic[2] != 0x03 || db->magic[3] != 0x0c) {
@@ -465,41 +566,43 @@ cmd_db_address(const char *name)
 static bool
 ddr_rpmh_write(const uint32_t *address, const uint32_t *data, unsigned count)
 {
-	uint32_t irq_enable = *(volatile uint32_t *)TCS_REG(0x00);
+	const struct rsc_layout *l = board->rsc_regs;
+	vm_offset_t tcs0 = ddr_rsc + 0xd00;
+	uint32_t irq_enable = *(volatile uint32_t *)(tcs0 + l->irq_enable);
 	bool done = false;
 
-	for (int i = 0; *(volatile uint32_t *)TCS_REG(0x18) == 0; i++) {
+	for (int i = 0; *(volatile uint32_t *)(tcs0 + l->status) == 0; i++) {
 		if (i > 2000) {
 			tell("ddr: RPMh: the command slots stay busy\n");
 			return false;
 		}
 		delay_for_interval(100, NSEC_PER_USEC);
 	}
-	*(volatile uint32_t *)TCS_REG(0x14) &= ~(1u << 24);
-	*(volatile uint32_t *)TCS_REG(0x14) &= ~(1u << 16);
-	*(volatile uint32_t *)TCS_REG(0x08) = 1;
+	*(volatile uint32_t *)(tcs0 + l->control) &= ~(1u << 24);
+	*(volatile uint32_t *)(tcs0 + l->control) &= ~(1u << 16);
+	*(volatile uint32_t *)(tcs0 + l->irq_clear) = 1;
 	for (unsigned i = 0; i < count; i++) {
-		*(volatile uint32_t *)TCS_REG(0x30 + 20 * i) = 0x10008 | 0x100;        /* a 4-byte write, with a response */
-		*(volatile uint32_t *)TCS_REG(0x34 + 20 * i) = address[i];
-		*(volatile uint32_t *)TCS_REG(0x38 + 20 * i) = data[i];
+		*(volatile uint32_t *)(tcs0 + l->cmd_msgid + l->cmd_stride * i) = 0x10008 | 0x100;        /* a 4-byte write, with a response */
+		*(volatile uint32_t *)(tcs0 + l->cmd_addr + l->cmd_stride * i) = address[i];
+		*(volatile uint32_t *)(tcs0 + l->cmd_data + l->cmd_stride * i) = data[i];
 	}
-	*(volatile uint32_t *)TCS_REG(0x10) = (1u << count) - 1;
-	*(volatile uint32_t *)TCS_REG(0x1c) = (1u << count) - 1;
-	*(volatile uint32_t *)TCS_REG(0x00) = irq_enable | 1;
-	*(volatile uint32_t *)TCS_REG(0x14) = 1u << 16;
-	*(volatile uint32_t *)TCS_REG(0x14) = 1u << 16 | 1u << 24;
+	*(volatile uint32_t *)(tcs0 + l->wait) = (1u << count) - 1;
+	*(volatile uint32_t *)(tcs0 + l->cmd_enable) = (1u << count) - 1;
+	*(volatile uint32_t *)(tcs0 + l->irq_enable) = irq_enable | 1;
+	*(volatile uint32_t *)(tcs0 + l->control) = 1u << 16;
+	*(volatile uint32_t *)(tcs0 + l->control) = 1u << 16 | 1u << 24;
 	for (int i = 0; i < 2000 && !done; i++) {
-		done = (*(volatile uint32_t *)TCS_REG(0x04) & 1) != 0;
+		done = (*(volatile uint32_t *)(tcs0 + l->irq_status) & 1) != 0;
 		if (!done) {
 			delay_for_interval(100, NSEC_PER_USEC);
 		}
 	}
-	*(volatile uint32_t *)TCS_REG(0x14) &= ~(1u << 24);
-	*(volatile uint32_t *)TCS_REG(0x14) &= ~(1u << 16);
-	*(volatile uint32_t *)TCS_REG(0x1c) = 0;
-	*(volatile uint32_t *)TCS_REG(0x10) = 0;
-	*(volatile uint32_t *)TCS_REG(0x08) = 1;
-	*(volatile uint32_t *)TCS_REG(0x00) = irq_enable;
+	*(volatile uint32_t *)(tcs0 + l->control) &= ~(1u << 24);
+	*(volatile uint32_t *)(tcs0 + l->control) &= ~(1u << 16);
+	*(volatile uint32_t *)(tcs0 + l->cmd_enable) = 0;
+	*(volatile uint32_t *)(tcs0 + l->wait) = 0;
+	*(volatile uint32_t *)(tcs0 + l->irq_clear) = 1;
+	*(volatile uint32_t *)(tcs0 + l->irq_enable) = irq_enable;
 	if (!done) {
 		tell("ddr: RPMh: no answer to the vote\n");
 	}
@@ -528,7 +631,7 @@ ddr_raise(void)
 		tell("ddr: no vote (MC0 %#x, SH0 %#x, ACV %#x, vote %u)\n", ddr_mc0, ddr_sh0, ddr_acv, vote);
 		return;
 	}
-	ddr_rsc = ml_io_map(RSC_PHYS, RSC_SIZE);
+	ddr_rsc = ml_io_map(board->rsc_phys, RSC_SIZE);
 	ddr_voted = ddr_vote(vote);
 	tell("ddr: memory bandwidth vote %u on MC0 (%#x) and SH0 (%#x)%s\n", vote, ddr_mc0, ddr_sh0, ddr_voted ? "" : ": FAILED");
 }
@@ -558,7 +661,15 @@ void
 hakios_cpufreq_init(void)
 {
 	const ml_topology_info_t *topology = ml_get_topology_info();
-	uint32_t enabled = 0, cores[EPSS_DOMAINS] = { 0 }, before, here;
+	uint32_t enabled = 0, cores[8] = { 0 }, before, here;
+	uint32_t bsel = 1;
+
+	PE_parse_boot_argn("cpufreq_board", &bsel, sizeof(bsel));
+	if (bsel == 0) {
+		board = &board_redwood;
+	} else {
+		board = &board_giulia;
+	}
 
 	load_start();
 	enabled = 2;
@@ -574,12 +685,15 @@ hakios_cpufreq_init(void)
 		return;
 	}
 	for (unsigned int i = 0; i < topology->num_cpus; i++) {
-		cores[domain_of(topology->cpus[i].phys_id)]++;
+		uint32_t d = board->domain_of(topology->cpus[i].phys_id);
+		if (d < 8) {
+			cores[d]++;
+		}
 	}
 	/* (whichever core this thread happens to be on, and stays on or not: it only goes to the log) */
 	here = (uint32_t)(__builtin_arm_rsr64("MPIDR_EL1") >> 8) & 0xff;
 	before = loop_speed();
-	for (uint32_t domain = 0; domain < EPSS_DOMAINS; domain++) {
+	for (uint32_t domain = 0; domain < board->epss_domains; domain++) {
 		if (cores[domain] != 0) {
 			raise_domain(domain, cores[domain]);
 		}
