@@ -3577,10 +3577,10 @@ hakios_gpu_parameter(uint32_t which, uint64_t *value)
 		*value = 0;
 		return true;
 	case 0x02:                              /* GMEM_SIZE */
-		*value = 512 * 1024;
+		*value = board->is_a7xx ? (3 * 1024 * 1024) : (512 * 1024);
 		return true;
 	case 0x03:                              /* CHIP_ID, with the speed bin above it */
-		*value = GPU_CHIP_ID | (uint64_t)speed_bin << 32;
+		*value = (uint64_t)board->gmu_chipid | ((uint64_t)speed_bin << 32);
 		return true;
 	case 0x04:                              /* MAX_FREQ */
 		*value = core_khz * 1000ull;
@@ -3592,7 +3592,7 @@ hakios_gpu_parameter(uint32_t which, uint64_t *value)
 		*value = 1;
 		return true;
 	case 0x10:                              /* HIGHEST_BANK_BIT */
-		*value = 14;
+		*value = board->is_a7xx ? 16 : 14;
 		return true;
 	case 0x12:                              /* UBWC_SWIZZLE */
 		*value = 6;

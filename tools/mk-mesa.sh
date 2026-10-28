@@ -71,7 +71,7 @@ rm -rf mesa-$VERSION/src/compiler/air
 cp -r "$ROOT/tools/mesa/air" mesa-$VERSION/src/compiler/air
 if [ ! -x venv/bin/python3 ]; then
 	python3 -m venv venv
-	venv/bin/pip -q install mako pyyaml packaging
+	venv/bin/pip -q install mako pyyaml packaging meson ninja
 fi
 export PATH=$B/venv/bin:$PATH
 
