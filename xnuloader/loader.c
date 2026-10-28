@@ -15,7 +15,7 @@
 /* ------------------------------------------------------------------------ */
 /* Fixed conventions shared with the boot shim, the packer and the kernel   */
 
-#define PAYLOAD_BASE        0xF0000000ULL
+#define PAYLOAD_BASE        (PLAT && PLAT->payload_base ? PLAT->payload_base : 0xF4000000ULL)
 #define PAYLOAD_MAGIC       0x50554E58u /* "XNUP" */
 
 struct payload_header { uint32_t magic; uint32_t size; };
@@ -515,8 +515,11 @@ dt_end(struct dt_writer *w)
 
 struct platform {
 	const char *name;
+	uint64_t payload_base;           /* base address of the XNUP container in RAM */
 	uint64_t io_base, io_size;       /* one window covering the SoC peripherals */
 	uint64_t gic_dist, gic_redist;   /* GICv3 */
+	uint32_t gic_redist_size;        /* 0: 1 MB, or larger region (e.g. 2 MB) */
+	uint32_t gic_redist_stride;      /* stride between redistributor frames (0x20000 or 0x40000) */
 	uint64_t uart;                   /* PL011, 0 if none */
 	int psci_hvc;                    /* the firmware's power interface is called with HVC, not SMC */
 	int log_other_cpu;               /* keep notes in the log partition while a kernel starts on another core */
@@ -527,7 +530,7 @@ struct platform {
 };
 
 static const struct platform platform_qemu_virt = {
-	.name = "qemu-virt", .io_base = 0x08000000, .io_size = 0x08000000,
+	.name = "qemu-virt", .payload_base = 0xF0000000ULL, .io_base = 0x08000000, .io_size = 0x08000000,
 	.gic_dist = 0x08000000, .gic_redist = 0x080A0000, .uart = 0x09000000, .psci_hvc = 1,
 	.cores = 8, .core_shift = 0,
 	/*
@@ -540,7 +543,7 @@ static const struct platform platform_qemu_virt = {
 
 static const struct platform platform_redwood = {
 	/* io_base must be non-zero: XNU treats a zero SoC base as "no SoC" and skips clock setup. */
-	.name = "redwood", .io_base = 0x00400000, .io_size = 0x3FC00000,
+	.name = "redwood", .payload_base = 0xF0000000ULL, .io_base = 0x00400000, .io_size = 0x3FC00000,
 	.gic_dist = 0x17A00000, .gic_redist = 0x17A60000, .uart = 0, .log_other_cpu = 1,
 	.cores = 8, .core_shift = 8,
 	/*
@@ -549,6 +552,19 @@ static const struct platform platform_redwood = {
 	 * (XNU's machine_routines.c, ml_choose_slow_core_partners()).
 	 */
 	.small_cores = 0x0f,
+};
+
+static const struct platform platform_giulia = {
+	/* io_base must be non-zero: XNU treats a zero SoC base as "no SoC" and skips clock setup. */
+	.name = "giulia", .payload_base = 0xF4000000ULL, .io_base = 0x00400000, .io_size = 0x3FC00000,
+	.gic_dist = 0x17100000, .gic_redist = 0x17180000,
+	.gic_redist_size = 0x200000, .gic_redist_stride = 0x40000,
+	.uart = 0, .log_other_cpu = 1,
+	.cores = 8, .core_shift = 8,
+	/*
+	 * Cores 0-1 are Kryo silver/small (capacity 0x400), 2-7 are gold/prime (capacity 0x700, 0x766).
+	 */
+	.small_cores = 0x03,
 };
 
 /* ------------------------------------------------------------------------ */
@@ -3235,8 +3251,13 @@ run_kernel(int have_checkpoint, uint64_t checkpoint)
 	dt_begin(&w, "gic");
 	dt_prop_str(&w, "device_type", "interrupt-controller");
 	dt_prop_str(&w, "compatible", "arm,gic-v3");
-	uint64_t gic_reg[4] = { plat->gic_dist - plat->io_base, 0x10000, plat->gic_redist - plat->io_base, 0x100000 };
+	uint64_t gic_reg[4] = { plat->gic_dist - plat->io_base, 0x10000, plat->gic_redist - plat->io_base,
+	    plat->gic_redist_size != 0 ? plat->gic_redist_size : 0x100000 };
 	dt_prop(&w, "reg", gic_reg, sizeof(gic_reg));
+	if (plat->gic_redist_stride != 0) {
+		uint32_t gic_stride[2] = { 0, plat->gic_redist_stride };
+		dt_prop(&w, "redistributor-stride", gic_stride, sizeof(gic_stride));
+	}
 	dt_end(&w);
 	if (plat->uart != 0) {
 		dt_begin(&w, "uart0");
@@ -3932,6 +3953,8 @@ efi_main(efi_handle image, efi_system_table *st)
 		SCREEN.stride = GOP->mode->info->pixels_per_scanline * 4;
 		if (SCREEN.base == 0xE1000000ULL) {
 			PLAT = &platform_redwood;
+		} else if (SCREEN.base == 0xD5100000ULL) {
+			PLAT = &platform_giulia;
 		} else {
 			ramfb_phone_screen();
 		}

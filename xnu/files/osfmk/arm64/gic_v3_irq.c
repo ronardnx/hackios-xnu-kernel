@@ -55,7 +55,7 @@
 #define GICD_IGRPMODR(n)        (0x0d00 + 4 * (n))
 #define GICD_IROUTER(n)         (0x6000 + 8 * (n))
 
-#define GICR_FRAME_SIZE         0x20000     /* RD_base + SGI_base per CPU */
+#define GICR_FRAME_SIZE_DEFAULT 0x20000ULL
 #define GICR_TYPER              0x0008
 #define GICR_TYPER_LAST         (1u << 4)
 #define GICR_WAKER              0x0014
@@ -80,6 +80,7 @@
 
 static vm_offset_t gicd_base, gicr_base;
 static vm_size_t   gicr_size;
+static vm_size_t   gicr_stride = GICR_FRAME_SIZE_DEFAULT;
 static vm_offset_t gicr_cpu_base[MAX_CPUS]; /* each processor's redistributor frame */
 
 /*
@@ -399,7 +400,7 @@ gic_find_redistributor(void)
 	/* GICR_TYPER[63:32] packs Aff3.Aff2.Aff1.Aff0 */
 	uint32_t affinity = (uint32_t)(((mpidr >> 32) & 0xff) << 24 | (mpidr & 0xffffff));
 
-	for (vm_offset_t frame = gicr_base; frame + GICR_FRAME_SIZE <= gicr_base + gicr_size; frame += GICR_FRAME_SIZE) {
+	for (vm_offset_t frame = gicr_base; frame + gicr_stride <= gicr_base + gicr_size; frame += gicr_stride) {
 		uint64_t typer = *(volatile uint64_t *)(frame + GICR_TYPER);
 
 		if ((uint32_t)(typer >> 32) == affinity) {
@@ -432,6 +433,23 @@ gic_v3_irq_cpu_init(void)
 		}
 		uint64_t const *reg = prop;
 		vm_offset_t soc_base = pe_arm_get_soc_base_phys();
+
+		void const *stride_prop;
+		unsigned int stride_size;
+
+		if (SecureDTGetProperty(entry, "redistributor-stride", &stride_prop, &stride_size) == kSuccess) {
+			uint32_t const *cells = stride_prop;
+			uint64_t stride = stride_size >= sizeof(uint32_t) ? cells[0] : 0;
+			int cores = ml_get_cpu_count();
+
+			if (stride_size >= 2 * sizeof(uint32_t)) {
+				stride = (uint64_t)cells[0] << 32 | cells[1];
+			}
+			if (stride >= 0x10000 && (stride & (stride - 1)) == 0 && stride <= reg[3] &&
+			    (cores <= 0 || stride <= reg[3] / (uint64_t)cores)) {
+				gicr_stride = (vm_size_t)stride;
+			}
+		}
 
 		simple_lock_init(&gic_spi_lock, 0);
 		gicd_base = ml_io_map(soc_base + reg[0], reg[1]);

@@ -16,27 +16,42 @@ import argparse, gzip, os, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MU = os.path.join(HERE, 'Mu-Silicium')
-PREBUILT = os.path.join(HERE, 'devices', 'poco-x5-pro', 'prebuilt')
-FD_BASE, FD_SIZE = 0x9FD00000, 0x200000
-PAYLOAD_BASE, PAYLOAD_MAX = 0xF0000000, 0x04000000
+DEVICES = {
+    'poco-x5-pro': {'fd_base': 0x9FD00000, 'fd_size': 0x200000, 'payload_base': 0xF0000000, 'header_version': '1', 'pkg': 'redwoodPkg'},
+    'giulia': {'fd_base': 0xA7100000, 'fd_size': 0x300000, 'payload_base': 0xF4000000, 'header_version': '4', 'pkg': 'giuliaPkg'},
+}
 
 ap = argparse.ArgumentParser()
+ap.add_argument('-d', '--device', default=os.getenv('DEVICE', 'giulia'), choices=list(DEVICES.keys()))
 ap.add_argument('-p', '--payload')
-ap.add_argument('-o', '--output', default=os.path.join(HERE, 'xnu-redwood.img'))
+ap.add_argument('-o', '--output')
 ap.add_argument('--mode', default='RELEASE')
 args = ap.parse_args()
 
-fd_path = os.path.join(MU, f'Build/redwoodPkg/{args.mode}_CLANGPDB/FV/SILICIUM_UEFI.fd')
+dev = DEVICES[args.device]
+FD_BASE, FD_SIZE = dev['fd_base'], dev['fd_size']
+PAYLOAD_BASE, PAYLOAD_MAX = dev['payload_base'], 0x04000000
+PREBUILT = os.path.join(HERE, 'devices', args.device, 'prebuilt')
+if not args.output:
+    args.output = os.path.join(HERE, f'xnu-{args.device}.img')
+if not args.payload and os.path.isfile(os.path.join(HERE, 'usb-payload.bin')):
+    args.payload = os.path.join(HERE, 'usb-payload.bin')
+
+fd_path = os.path.join(MU, f"Build/{dev['pkg']}/{args.mode}_CLANGPDB/FV/SILICIUM_UEFI.fd")
 if os.path.isfile(fd_path):
     shim_dir = os.path.join(MU, 'BootShim')
     for f in ('BootShim.elf', 'BootShim.bin'):
         try: os.unlink(os.path.join(shim_dir, f))
         except FileNotFoundError: pass
     subprocess.check_call(['make', 'REQUIRES_KERNEL_HEADER=1', f'FD_BASE={FD_BASE:#x}', f'FD_SIZE={FD_SIZE:#x}',
+                           f'PAYLOAD_BASE={PAYLOAD_BASE:#x}',
                            f'CFLAGS=--target=aarch64-linux-gnu -DPAYLOAD_BASE={PAYLOAD_BASE:#x}'],
                           cwd=shim_dir, stdout=subprocess.DEVNULL)
+    dtb_path = os.path.join(MU, f'Resources/DTBs/{args.device}.dtb')
+    if not os.path.isfile(dtb_path):
+        dtb_path = os.path.join(PREBUILT, 'device-tree.dtb')
     parts = {'shim': os.path.join(shim_dir, 'BootShim.bin'), 'fd': fd_path,
-             'dtb': os.path.join(MU, 'Resources/DTBs/redwood.dtb'), 'ramdisk': os.path.join(MU, 'Resources/ramdisk'),
+             'dtb': dtb_path, 'ramdisk': os.path.join(MU, 'Resources/ramdisk'),
              'mkbootimg': os.path.join(MU, 'Resources/Scripts/mkbootimg.py')}
 else:
     parts = {'shim': os.path.join(PREBUILT, 'BootShim.bin'), 'fd': os.path.join(PREBUILT, 'SILICIUM_UEFI.fd'),
@@ -60,7 +75,11 @@ kernel = args.output + '.kernel~'
 open(kernel, 'wb').write(gzip.compress(blob, 6) + dtb)
 try:
     subprocess.check_call([sys.executable, parts['mkbootimg'], '--kernel', kernel, '--ramdisk', parts['ramdisk'],
-                           '--header_version', '1', '-o', args.output])
+                           '--header_version', dev['header_version'], '-o', args.output])
+    if args.device == 'giulia':
+        with open(args.output, 'r+b') as f:
+            f.seek(16)
+            f.write(bytes([0xa7, 0x01, 0x00, 0x20]))
 finally:
     os.unlink(kernel)
 print(f'{args.output}: {os.path.getsize(args.output)} bytes (shim {len(shim)}, uncompressed {len(blob)})')

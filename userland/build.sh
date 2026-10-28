@@ -392,7 +392,7 @@ if [ -d $IOS/rootfs/usr/lib ]; then
 fi
 # firmware of the phone's own hardware, where somebody has pulled it from the phone's Android into ../fw-gpu
 # (it is the vendor's and never in the repository): the kernel's GPU bring-up, bsd/dev/hakios.adreno.c, finds it in fw/
-if [ -d ../fw-gpu ]; then
+if [ -d ../fw-gpu ] && [ -n "$(ls -A ../fw-gpu 2>/dev/null)" ]; then
 	mkdir -p root/fw
 	cp ../fw-gpu/* root/fw/
 fi

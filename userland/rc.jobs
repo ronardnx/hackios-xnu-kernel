@@ -7,3 +7,10 @@
 # the processors: how many, and -- once the system has settled -- whether they work at the same time
 /redwood/bin/cpu_test
 /redwood/bin/cpu_test 240 &
+
+# Automated touch demo via rwtouch:
+# 1. Swipe left across pages
+# 2. Swipe right back to Home
+# 3. Tap to open Settings (Configurari)
+# 4. Swipe up to return to Home Screen
+/redwood/bin/rwtouch wait 14 swipe 0.85 0.5 0.15 0.5 250 wait 3 swipe 0.15 0.5 0.85 0.5 250 wait 3 tap 0.615 0.71 wait 6 swipe 0.5 0.99 0.5 0.5 200 &
