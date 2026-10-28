@@ -1488,6 +1488,9 @@ publishAccelerator(IOService * provider)
 
 	if (accelerator != NULL && accelerator->init() && accelerator->attach(provider)) {
 		accelerator->setName("sgx");
+		accelerator->setProperty(kIOUserClientClassKey, "HakiosGPUUserClient");
+		accelerator->setProperty("MetalPluginName", "NativeAdrenoMetal");
+		accelerator->setProperty("MetalPluginClassName", "NativeAdrenoMetalDevice");
 		accelerator->registerService();
 	}
 	OSSafeReleaseNULL(accelerator);
