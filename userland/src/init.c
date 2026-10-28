@@ -198,6 +198,13 @@ flash_root(const char *dev)
 	    bind_dir(in_image("/xpc"), "/flash/System/Library/xpc"), "our launchd jobs, not iOS's");
 	check(bind_dir(in_image("/hal"), "/flash/System/Library/Audio/Plug-Ins/HAL"),
 	    "our audio device, not Apple's plug-ins");
+	{
+		struct stat ext_st;
+		if (stat(in_image("/Extensions"), &ext_st) == 0) {
+			ok = mount("bindfs", "/flash/System/Library/Extensions", MNT_RDONLY | MNT_UNION, (void *)in_image("/Extensions")) == 0;
+			check(ok, "our Metal extensions in /System/Library/Extensions (union)");
+		}
+	}
 	if (stat("/fw", &fw_st) == 0) {
 		/* the audio DSP's firmware and the speakers' configuration, from the RAM image as in a RAM boot */
 		check(synthetic_dir("/flash/fw") && bind_dir("/fw", "/flash/fw"), "the firmware on /fw (adsp=1, sound=N)");
@@ -1441,6 +1448,13 @@ main(int argc, char **argv, char **envp)
 	}
 
 	show_system();
+	if (!flash_root_mode) {
+		struct stat ext_st;
+		if (stat(in_image("/Extensions"), &ext_st) == 0) {
+			int ext_ok = mount("bindfs", "/System/Library/Extensions", MNT_RDONLY | MNT_UNION, (void *)in_image("/Extensions")) == 0;
+			check(ext_ok, "our Metal extensions in /System/Library/Extensions (union)");
+		}
+	}
 	mount_writable();
 	restore_var();
 	test_files();
