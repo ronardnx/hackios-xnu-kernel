@@ -38,6 +38,12 @@
 #include <kern/clock.h>
 #include <mach/mach_time.h>
 #include <mach/vm_param.h>
+
+extern "C" {
+#include <console/video_console.h>
+extern struct vc_info vinfo;
+void proc_selfname(char * buf, int size);
+}
 #include <sys/systm.h>
 
 #include "MiniIOSurface.h"
@@ -55,6 +61,7 @@ void hakios_gpu_mapped(void);
 void hakios_gpu_unmap(uint64_t address, uint64_t size);
 void hakios_gpu_to_memory(void * start, uint64_t size);
 uint32_t hakios_gpu_submit(const uint64_t * addresses, const uint32_t * words, uint32_t count);
+void hakios_gpu_request_context_reset(void);
 extern uint32_t gpu_log;
 bool hakios_gpu_done(uint32_t fence);
 uint32_t hakios_gpu_last(void);
@@ -160,12 +167,15 @@ struct hakios_show {
 #define MSM_INFO_SET_NAME       2
 #define MSM_INFO_GET_FLAGS      5
 #define MSM_BO_GPU_READONLY     0x00000002
+#define MSM_BO_CACHED           0x00010000
 #define MSM_PREP_NOSYNC         0x04
 #define MSM_SUBMIT_CMD_BUF      1
 #define MSM_SUBMIT_FENCE_FD_OUT 0x20000000
 
 #define GPU_BUFFERS             8192            /* a client's, at most */
 #define GPU_BUFFER_MAX          (256u << 20)
+#define GPU_ADDRESSES_START     0x20000000ull
+#define GPU_ADDRESSES_SIZE      0xe0000000ull
 #define GPU_SUBMIT_CMDS         128
 #define GPU_SUBMIT_BOS          8192
 #define GPU_PATIENCE_MS         5000            /* for a buffer or a submission that somebody waits for without a limit */
@@ -207,9 +217,9 @@ gpuWait(uint32_t fence, uint64_t milliseconds)
 		delay_for_interval(GPU_ASK_AGAIN_US, NSEC_PER_USEC);
 		IOLockLock(gGPULock);
 	}
-	if (milliseconds >= 1000 && !gGPUReported) {
+	if (!gGPUReported && milliseconds > 0) {
 		gGPUReported = true;
-		hakios_gpu_report("no answer");
+		hakios_gpu_report("wait timeout");
 	}
 	return false;
 }
@@ -292,9 +302,110 @@ class HakiosGPU : public IOService
 
 public:
 	virtual bool start(IOService * provider) APPLE_KEXT_OVERRIDE;
+	virtual IOReturn newUserClient(task_t owningTask, void * securityID,
+	    UInt32 type, OSDictionary * properties,
+	    IOUserClient ** handler) APPLE_KEXT_OVERRIDE;
 };
 
 OSDefineMetaClassAndStructors(HakiosGPU, IOService);
+
+static char gAdrenoStreamLine[128];
+static uint32_t gAdrenoStreamPos = 0;
+static char gAdrenoStreamWho[32];
+static thread_call_t gStreamFlushCall = NULL;
+
+static void
+adreno_stream_flush(void)
+{
+	if (gAdrenoStreamPos > 0) {
+		IOLog("NativeAdreno: [%s] %s\n", gAdrenoStreamWho[0] ? gAdrenoStreamWho : "client", gAdrenoStreamLine);
+		gAdrenoStreamLine[0] = '\0';
+		gAdrenoStreamPos = 0;
+		gAdrenoStreamWho[0] = '\0';
+	}
+}
+
+static void
+adreno_stream_flush_call(thread_call_param_t param0, thread_call_param_t param1)
+{
+	(void)param0;
+	(void)param1;
+	adreno_stream_flush();
+}
+
+extern "C" void
+hakios_adreno_handle_marker(UInt32 type)
+{
+	uint32_t val = type & 0xffff;
+	char who[32] = {};
+	proc_selfname(who, sizeof(who));
+
+	if (val >= 0x8000) {
+		adreno_stream_flush();
+		/* Telemetry row markers: 0xC000 | row starts row, 0x8000 | (a << 7) | b appends 2 chars */
+		static unsigned s_row = 48, s_len = 0;
+		static char s_rows[48][96];
+		if (val >= 0xC000) {
+			s_row = val & 0x3f;
+			s_len = 0;
+			if (s_row < 48) {
+				s_rows[s_row][0] = '\0';
+			}
+		} else if (s_row < 48) {
+			char pair[2] = { (char)((val >> 7) & 0x7f), (char)(val & 0x7f) };
+			for (int i = 0; i < 2; i++) {
+				if (pair[i] && s_len < sizeof(s_rows[0]) - 1) {
+					s_rows[s_row][s_len++] = pair[i];
+					s_rows[s_row][s_len] = '\0';
+				}
+			}
+		}
+		return;
+	}
+
+	if (val >= 0x7000 && val < 0x8000) {
+		if (val == 0x7fff || val == 0x7ffe) {
+			adreno_stream_flush();
+			strlcpy(gAdrenoStreamWho, who, sizeof(gAdrenoStreamWho));
+		} else if (val < 0x7100 && gAdrenoStreamPos < sizeof(gAdrenoStreamLine) - 1) {
+			char c = (char)(val & 0xff);
+			if (c == '\n') {
+				adreno_stream_flush();
+			} else {
+				if (!gAdrenoStreamWho[0]) {
+					strlcpy(gAdrenoStreamWho, who, sizeof(gAdrenoStreamWho));
+				}
+				gAdrenoStreamLine[gAdrenoStreamPos++] = c;
+				gAdrenoStreamLine[gAdrenoStreamPos] = '\0';
+				if (gStreamFlushCall != NULL) {
+					uint64_t deadline;
+					clock_absolutetime_interval_to_deadline(10 * NSEC_PER_MSEC, &deadline);
+					thread_call_enter_delayed(gStreamFlushCall, deadline);
+				}
+			}
+		}
+		return;
+	}
+
+	adreno_stream_flush();
+	IOLog("NativeAdreno: [%s] marker 0x%04x\n", who, val);
+}
+
+extern "C" IOReturn
+hakios_adreno_new_user_client(IOService * service, task_t owningTask, void * securityID,
+    UInt32 type, OSDictionary * properties, IOUserClient ** handler)
+{
+	if ((type >> 16) == 0x4147 && (type & 0xffff)) {
+		if (handler) {
+			*handler = NULL;
+		}
+		hakios_adreno_handle_marker(type);
+		return kIOReturnUnsupported;
+	}
+
+	adreno_stream_flush();
+	return service->IOService::newUserClient(owningTask, securityID, type, properties, handler);
+}
 
 bool
 HakiosGPU::start(IOService * provider)
@@ -308,6 +419,14 @@ HakiosGPU::start(IOService * provider)
 	return true;
 }
 
+IOReturn
+HakiosGPU::newUserClient(task_t owningTask, void * securityID,
+    UInt32 type, OSDictionary * properties,
+    IOUserClient ** handler)
+{
+	return hakios_adreno_new_user_client(this, owningTask, securityID, type, properties, handler);
+}
+
 void
 HakiosGPUStart(void)
 {
@@ -317,6 +436,9 @@ HakiosGPUStart(void)
 
 	gGPUCached = PE_parse_boot_argn("gpu_cached", &cached, sizeof(cached)) && cached != 0;
 	gGPULock = IOLockAlloc();
+	if (gStreamFlushCall == NULL) {
+		gStreamFlushCall = thread_call_allocate(adreno_stream_flush_call, NULL);
+	}
 	gpu = OSTypeAlloc(HakiosGPU);
 	if (gpu == NULL || provider == NULL || !gpu->init() || !gpu->attach(provider)) {
 		OSSafeReleaseNULL(gpu);
@@ -352,6 +474,8 @@ struct gpu_buffer {
 	uint64_t                        pushed;         /* ... and when that was */
 	bool                            seen;           /* by the program: mapped, and from then on written by it */
 	uint32_t                        fence;          /* the last submission that names it (0: none has) */
+	bool                            client_iova;
+	bool                            imported;
 };
 
 /*
@@ -366,6 +490,8 @@ struct gpu_left {
 	MiniIOSurface *                 surface;
 	uint64_t                        address, size;
 	uint32_t                        fence, flags;
+	bool                            client_iova;
+	bool                            imported;
 };
 #define GPU_LEFT                64
 
@@ -421,6 +547,7 @@ class HakiosGPUUserClient : public IOUserClient
 	IOReturn gemInfo(struct msm_gem_info * request);
 	IOReturn submit(struct msm_gem_submit * request);
 	IOReturn show(const struct hakios_show * request);
+	IOReturn handleTunnel(uint32_t method, const void * input, size_t input_size, void * output, uint32_t * output_size);
 
 public:
 	virtual bool initWithTask(task_t owningTask, void * securityID, UInt32 type, OSDictionary * properties) APPLE_KEXT_OVERRIDE;
@@ -437,10 +564,15 @@ OSDefineMetaClassAndStructors(HakiosGPUUserClient, IOUserClient);
 bool
 HakiosGPUUserClient::initWithTask(task_t owningTask, void * securityID, UInt32 type, OSDictionary * properties)
 {
+	if ((type >> 16) == 0x4147 && (type & 0xffff)) {
+		hakios_adreno_handle_marker(type);
+		return false;
+	}
 	if (!IOUserClient::initWithTask(owningTask, securityID, type, properties)) {
 		return false;
 	}
 	fTask = owningTask;
+	hakios_gpu_request_context_reset();
 	return true;
 }
 
@@ -476,6 +608,8 @@ HakiosGPUUserClient::freeBuffer(struct gpu_buffer * b)
 		left->size = b->size;
 		left->fence = b->fence;
 		left->flags = b->flags;
+		left->client_iova = b->client_iova;
+		left->imported = b->imported;
 	} else {
 		if (busy) {
 			static uint32_t said;
@@ -488,13 +622,20 @@ HakiosGPUUserClient::freeBuffer(struct gpu_buffer * b)
 			if (said++ < 8) {
 				IOLog("HakiosGPU: the GPU is not done with what it was given: a buffer of %llu bytes stays its own\n", b->size);
 			}
-		} else if (b->surface == NULL && hakios_gpu_ready() && keep(b->memory, b->kernel, b->address, b->size, b->flags)) {
+		} else if (b->surface == NULL && !b->client_iova && !b->imported && hakios_gpu_ready() && keep(b->memory, b->kernel, b->address, b->size, b->flags)) {
 			b->memory = NULL;               /* (now the kept one's) */
 		} else if (hakios_gpu_ready()) {
-			hakios_gpu_unmap(b->address, b->size);
-			hakios_gpu_address_free(b->address, b->size);
+			if (b->address != 0) {
+				hakios_gpu_unmap(b->address, b->size);
+				if (!b->client_iova) {
+					hakios_gpu_address_free(b->address, b->size);
+				}
+			}
 		}
 		if (b->memory != NULL) {
+			if (b->imported) {
+				b->memory->complete(kIODirectionInOut);
+			}
 			b->memory->release();
 		}
 		if (b->surface != NULL) {
@@ -518,14 +659,21 @@ HakiosGPUUserClient::reap(void)
 			i++;
 			continue;
 		}
-		if (left->surface == NULL && hakios_gpu_ready() &&
+		if (left->surface == NULL && !left->client_iova && !left->imported && hakios_gpu_ready() &&
 		    keep(left->memory, NULL, left->address, left->size, left->flags)) {
 			left->memory = NULL;
 		} else if (hakios_gpu_ready()) {
-			hakios_gpu_unmap(left->address, left->size);
-			hakios_gpu_address_free(left->address, left->size);
+			if (left->address != 0) {
+				hakios_gpu_unmap(left->address, left->size);
+				if (!left->client_iova) {
+					hakios_gpu_address_free(left->address, left->size);
+				}
+			}
 		}
 		if (left->memory != NULL) {
+			if (left->imported) {
+				left->memory->complete(kIODirectionInOut);
+			}
 			left->memory->release();
 		}
 		if (left->surface != NULL) {
@@ -631,6 +779,8 @@ HakiosGPUUserClient::newBuffer(IOMemoryDescriptor * memory, uint64_t from, uint6
 	b->seen = false;
 	b->fence = 0;
 	b->surface = NULL;
+	b->client_iova = false;
+	b->imported = false;
 	fBufferCount++;
 	fBufferBytes += size;
 	return b;
@@ -1058,6 +1208,25 @@ HakiosGPUUserClient::show(const struct hakios_show * request)
 IOReturn
 HakiosGPUUserClient::clientMemoryForType(UInt32 type, IOOptionBits * options, IOMemoryDescriptor ** memory)
 {
+	if (type == 0x5343) { /* 'SC' - Scanout Framebuffer */
+		if (vinfo.v_baseaddr == 0 || vinfo.v_rowbytes == 0 || vinfo.v_height == 0) {
+			return kIOReturnNotReady;
+		}
+		IOMemoryDescriptor * mem = IOMemoryDescriptor::withAddressRange(
+		    (mach_vm_address_t)vinfo.v_baseaddr,
+		    (mach_vm_size_t)vinfo.v_rowbytes * vinfo.v_height,
+		    kIODirectionInOut,
+		    kernel_task);
+		if (mem == NULL) {
+			return kIOReturnNoMemory;
+		}
+		if (options != NULL) {
+			*options = 0;
+		}
+		*memory = mem;
+		return kIOReturnSuccess;
+	}
+
 	struct gpu_buffer * b;
 	IOReturn ret = kIOReturnBadArgument;
 
@@ -1074,10 +1243,619 @@ HakiosGPUUserClient::clientMemoryForType(UInt32 type, IOOptionBits * options, IO
 	return ret;
 }
 
+#define NATIVE_ADRENO_TUNNEL_MAGIC 0x4e544e4c /* 'NTNL' */
+
+enum {
+	kNativeAdrenoAbiVersion = 2,
+	kNativeAdrenoAbiMaxBuffers = 128,
+	kNativeAdrenoAbiMaxBoBytesShift = 28,
+	kNativeAdrenoMethodQuery = 1,
+	kNativeAdrenoMethodBoAlloc = 2,
+	kNativeAdrenoMethodBoMap = 3,
+	kNativeAdrenoMethodBoFree = 4,
+	kNativeAdrenoMethodSubmit = 5,
+	kNativeAdrenoMethodWaitFence = 6,
+	kNativeAdrenoMethodGetTimestamp = 7,
+	kNativeAdrenoMethodGetStatus = 8,
+	kNativeAdrenoMethodSetMetadata = 9,
+	kNativeAdrenoMethodGetMetadata = 10,
+	kNativeAdrenoMethodCreateQueue = 11,
+	kNativeAdrenoMethodCloseQueue = 12,
+	kNativeAdrenoMethodBoCpuMap = 13,
+	kNativeAdrenoMethodBoCpuUnmap = 14,
+	kNativeAdrenoMethodGetDeviceInfo = 15,
+	kNativeAdrenoMethodBoImport = 16,
+};
+
+struct NativeAdrenoAbiParams {
+	uint32_t abi_version;
+	uint32_t input_bits;
+	uint32_t output_bits;
+	uint32_t flags;
+	uint64_t max_bo_bytes;
+};
+
+struct NativeAdrenoAbiDeviceInfo {
+	uint32_t chip_id;
+	uint32_t gmem_bytes;
+	uint64_t gmem_base;
+	uint64_t uche_trap_base;
+	uint64_t va_start;
+	uint64_t va_size;
+	uint32_t highest_bank_bit;
+	uint32_t ubwc_swizzle;
+	uint32_t macrotile_mode;
+	uint32_t ubwc_version;
+	uint32_t flags;
+	uint32_t reserved;
+};
+
+struct NativeAdrenoAbiBoAlloc {
+	uint64_t bytes;
+	uint32_t align_log2;
+	uint32_t contiguous;
+};
+
+struct NativeAdrenoAbiBoAllocReply {
+	uint64_t handle;
+};
+
+struct NativeAdrenoAbiBoMap {
+	uint64_t handle;
+	uint64_t iova;
+	uint32_t permissions;
+	uint32_t writeback;
+	uint32_t shareability;
+	uint32_t reserved;
+};
+
+struct NativeAdrenoAbiBoMapReply {
+	uint64_t iova;
+};
+
+struct NativeAdrenoAbiBoFree {
+	uint64_t handle;
+};
+
+struct NativeAdrenoAbiBoCpuMap {
+	uint64_t handle;
+};
+
+struct NativeAdrenoAbiBoCpuMapReply {
+	uint32_t token;
+	uint32_t reserved;
+	uint64_t bytes;
+};
+
+struct NativeAdrenoAbiBoCpuUnmap {
+	uint64_t handle;
+	uint32_t token;
+	uint32_t reserved;
+};
+
+struct NativeAdrenoAbiBoImport {
+	uint64_t address;
+	uint64_t bytes;
+};
+
+struct NativeAdrenoAbiSubmitBuffer {
+	uint64_t handle;
+	uint64_t iova;
+	uint64_t bytes;
+};
+
+struct NativeAdrenoAbiSubmit {
+	uint32_t buffer_count;
+	uint32_t reserved;
+	uint64_t queue;
+	uint64_t wait_fence;
+	uint64_t wait_timeout_ns;
+	NativeAdrenoAbiSubmitBuffer buffers[kNativeAdrenoAbiMaxBuffers];
+};
+
+struct NativeAdrenoAbiSubmitReply {
+	uint64_t fence;
+};
+
+struct NativeAdrenoAbiWaitFence {
+	uint64_t fence;
+	uint64_t timeout_ns;
+};
+
+struct NativeAdrenoAbiTimestamp {
+	uint64_t ticks;
+};
+
+struct NativeAdrenoAbiStatus {
+	uint64_t faults;
+	uint64_t suspends;
+};
+
+struct NativeAdrenoAbiQueueReply {
+	uint64_t queue;
+};
+
+enum {
+	kNativeAdrenoAbiMetadataBytes = 64,
+};
+
+struct NativeAdrenoAbiMetadata {
+	uint64_t handle;
+	uint32_t bytes;
+	uint32_t reserved;
+	char text[kNativeAdrenoAbiMetadataBytes];
+};
+
+IOReturn
+HakiosGPUUserClient::handleTunnel(uint32_t method, const void * input, size_t input_size, void * output, uint32_t * output_size)
+{
+	adreno_stream_flush();
+	switch (method) {
+	case kNativeAdrenoMethodQuery: {
+		if (output == NULL || *output_size < sizeof(NativeAdrenoAbiParams)) {
+			return kIOReturnBadArgument;
+		}
+		NativeAdrenoAbiParams reply;
+		bzero(&reply, sizeof(reply));
+		reply.abi_version = kNativeAdrenoAbiVersion;
+		reply.input_bits = 48;
+		reply.output_bits = 36;
+		reply.flags = 1; /* NativeAdrenoParamsHostImport */
+		reply.max_bo_bytes = 1ULL << kNativeAdrenoAbiMaxBoBytesShift;
+		memcpy(output, &reply, sizeof(reply));
+		*output_size = sizeof(reply);
+		IOLog("HakiosGPU: NativeAdreno query handled (abi=%u)\n", reply.abi_version);
+		return kIOReturnSuccess;
+	}
+
+	case kNativeAdrenoMethodGetDeviceInfo: {
+		if (output == NULL || *output_size < sizeof(NativeAdrenoAbiDeviceInfo)) {
+			return kIOReturnBadArgument;
+		}
+		NativeAdrenoAbiDeviceInfo reply;
+		bzero(&reply, sizeof(reply));
+		uint64_t val = 0;
+		if (hakios_gpu_parameter(0x03, &val)) {
+			reply.chip_id = (uint32_t)val;
+		} else {
+			reply.chip_id = 0x43051401;
+		}
+		if (hakios_gpu_parameter(0x02, &val)) {
+			reply.gmem_bytes = (uint32_t)val;
+		} else {
+			reply.gmem_bytes = 3 * 1024 * 1024;
+		}
+		reply.gmem_base = 0x1000000ull;
+		reply.uche_trap_base = 0x0001fffffffff000ull;
+		reply.va_start = GPU_ADDRESSES_START;
+		reply.va_size = GPU_ADDRESSES_SIZE;
+		if (hakios_gpu_parameter(0x10, &val)) {
+			reply.highest_bank_bit = (uint32_t)val;
+		} else {
+			reply.highest_bank_bit = 16;
+		}
+		if (hakios_gpu_parameter(0x12, &val)) {
+			reply.ubwc_swizzle = (uint32_t)val;
+		} else {
+			reply.ubwc_swizzle = 6;
+		}
+		if (hakios_gpu_parameter(0x13, &val)) {
+			reply.macrotile_mode = (uint32_t)val;
+		} else {
+			reply.macrotile_mode = 1;
+		}
+		reply.ubwc_version = 4;
+		reply.flags = 1; /* NativeAdrenoDeviceClientIova */
+		memcpy(output, &reply, sizeof(reply));
+		*output_size = sizeof(reply);
+		IOLog("HakiosGPU: NativeAdreno device info: chip %#x, gmem %uKB, va %#llx..%#llx\n",
+		    reply.chip_id, reply.gmem_bytes >> 10, reply.va_start, reply.va_start + reply.va_size);
+		return kIOReturnSuccess;
+	}
+
+	case kNativeAdrenoMethodBoAlloc: {
+		if (input == NULL || input_size < sizeof(NativeAdrenoAbiBoAlloc) ||
+		    output == NULL || *output_size < sizeof(NativeAdrenoAbiBoAllocReply)) {
+			return kIOReturnBadArgument;
+		}
+		const NativeAdrenoAbiBoAlloc * req = (const NativeAdrenoAbiBoAlloc *)input;
+		NativeAdrenoAbiBoAllocReply * reply = (NativeAdrenoAbiBoAllocReply *)output;
+		uint64_t size = round_page_64(req->bytes);
+
+		if (size == 0 || size > GPU_BUFFER_MAX) {
+			return kIOReturnBadArgument;
+		}
+		IOBufferMemoryDescriptor * memory = IOBufferMemoryDescriptor::inTaskWithOptions(
+		    kernel_task,
+		    kIODirectionInOut | kIOMemoryKernelUserShared | (gGPUCached ? 0 : kIOMapWriteCombineCache),
+		    (vm_size_t)size, PAGE_SIZE);
+		if (memory == NULL) {
+			return kIOReturnNoMemory;
+		}
+		if (gGPUCached) {
+			hakios_gpu_to_memory(memory->getBytesNoCopy(), size);
+		}
+
+		IOLockLock(gGPULock);
+		struct gpu_buffer * b = NULL;
+		uint32_t handle = 0;
+		for (uint32_t n = 0; n < GPU_BUFFERS; n++) {
+			uint32_t i = (fNextBuffer + n) % GPU_BUFFERS;
+			if (fBuffers[i].memory == NULL) {
+				b = &fBuffers[i];
+				handle = i + 1;
+				fNextBuffer = i + 1;
+				break;
+			}
+		}
+		if (b == NULL) {
+			IOLockUnlock(gGPULock);
+			memory->release();
+			return kIOReturnNoResources;
+		}
+		bzero(b, sizeof(*b));
+		b->memory = memory;
+		b->kernel = (uint8_t *)memory->getBytesNoCopy();
+		b->size = size;
+		b->flags = 0;
+		b->address = 0;
+		b->seen = false;
+		b->client_iova = true;
+		b->imported = false;
+		fBufferCount++;
+		fBufferBytes += size;
+		IOLockUnlock(gGPULock);
+
+		char who[32] = {};
+		proc_selfname(who, sizeof(who));
+		IOLog("NativeAdreno: [%s] BoAlloc handle=%u bytes=%llu\n", who, handle, size);
+
+		reply->handle = handle;
+		*output_size = sizeof(*reply);
+		return kIOReturnSuccess;
+	}
+
+	case kNativeAdrenoMethodBoMap: {
+		if (input == NULL || input_size < sizeof(NativeAdrenoAbiBoMap) ||
+		    output == NULL || *output_size < sizeof(NativeAdrenoAbiBoMapReply)) {
+			return kIOReturnBadArgument;
+		}
+		const NativeAdrenoAbiBoMap * req = (const NativeAdrenoAbiBoMap *)input;
+		NativeAdrenoAbiBoMapReply * reply = (NativeAdrenoAbiBoMapReply *)output;
+
+		IOLockLock(gGPULock);
+		struct gpu_buffer * b = buffer((uint32_t)req->handle);
+		if (b == NULL) {
+			IOLockUnlock(gGPULock);
+			return kIOReturnBadArgument;
+		}
+		if (b->address != 0) {
+			IOLockUnlock(gGPULock);
+			return kIOReturnBusy;
+		}
+		b->address = req->iova;
+		bool mapped = true;
+		for (uint64_t offset = 0; offset < b->size && mapped; offset += 4096) {
+			IOByteCount length = 0;
+			addr64_t phys = b->memory->getPhysicalSegment(offset, &length, kIOMemoryMapperNone);
+			mapped = phys != 0 && hakios_gpu_map(b->address + offset, phys, (req->permissions & 2) == 0);
+		}
+		hakios_gpu_mapped();
+		if (!mapped) {
+			hakios_gpu_unmap(b->address, b->size);
+			b->address = 0;
+			IOLockUnlock(gGPULock);
+			return kIOReturnNoMemory;
+		}
+
+		char who[32] = {};
+		proc_selfname(who, sizeof(who));
+		IOLog("NativeAdreno: [%s] BoMap handle=%llu iova=0x%llx bytes=%llu\n", who, req->handle, req->iova, b->size);
+
+		reply->iova = b->address;
+		*output_size = sizeof(*reply);
+		IOLockUnlock(gGPULock);
+		return kIOReturnSuccess;
+	}
+
+	case kNativeAdrenoMethodBoFree: {
+		if (input == NULL || input_size < sizeof(NativeAdrenoAbiBoFree)) {
+			return kIOReturnBadArgument;
+		}
+		const NativeAdrenoAbiBoFree * req = (const NativeAdrenoAbiBoFree *)input;
+
+		IOLockLock(gGPULock);
+		struct gpu_buffer * b = buffer((uint32_t)req->handle);
+		if (b == NULL) {
+			IOLockUnlock(gGPULock);
+			return kIOReturnBadArgument;
+		}
+		freeBuffer(b);
+		reap();
+		IOLockUnlock(gGPULock);
+		return kIOReturnSuccess;
+	}
+
+	case kNativeAdrenoMethodBoCpuMap: {
+		if (input == NULL || input_size < sizeof(NativeAdrenoAbiBoCpuMap) ||
+		    output == NULL || *output_size < sizeof(NativeAdrenoAbiBoCpuMapReply)) {
+			return kIOReturnBadArgument;
+		}
+		const NativeAdrenoAbiBoCpuMap * req = (const NativeAdrenoAbiBoCpuMap *)input;
+		NativeAdrenoAbiBoCpuMapReply * reply = (NativeAdrenoAbiBoCpuMapReply *)output;
+
+		IOLockLock(gGPULock);
+		struct gpu_buffer * b = buffer((uint32_t)req->handle);
+		if (b == NULL) {
+			IOLockUnlock(gGPULock);
+			return kIOReturnBadArgument;
+		}
+		reply->token = (uint32_t)req->handle;
+		reply->reserved = 0;
+		reply->bytes = b->size;
+		*output_size = sizeof(*reply);
+		IOLockUnlock(gGPULock);
+		return kIOReturnSuccess;
+	}
+
+	case kNativeAdrenoMethodBoCpuUnmap:
+		return kIOReturnSuccess;
+
+	case kNativeAdrenoMethodBoImport: {
+		if (input == NULL || input_size < sizeof(NativeAdrenoAbiBoImport) ||
+		    output == NULL || *output_size < sizeof(NativeAdrenoAbiBoAllocReply)) {
+			return kIOReturnBadArgument;
+		}
+		const NativeAdrenoAbiBoImport * req = (const NativeAdrenoAbiBoImport *)input;
+		NativeAdrenoAbiBoAllocReply * reply = (NativeAdrenoAbiBoAllocReply *)output;
+		uint64_t size = round_page_64(req->bytes);
+
+		if (size == 0 || size > GPU_BUFFER_MAX || (req->address & 4095)) {
+			return kIOReturnBadArgument;
+		}
+		IOMemoryDescriptor * memory = IOMemoryDescriptor::withAddressRange(
+		    (mach_vm_address_t)req->address,
+		    (mach_vm_size_t)size,
+		    kIODirectionInOut,
+		    fTask != NULL ? fTask : current_task());
+		if (memory == NULL) {
+			return kIOReturnNoMemory;
+		}
+		if (memory->prepare(kIODirectionInOut) != kIOReturnSuccess) {
+			memory->release();
+			return kIOReturnVMError;
+		}
+
+		IOLockLock(gGPULock);
+		struct gpu_buffer * b = NULL;
+		uint32_t handle = 0;
+		for (uint32_t n = 0; n < GPU_BUFFERS; n++) {
+			uint32_t i = (fNextBuffer + n) % GPU_BUFFERS;
+			if (fBuffers[i].memory == NULL) {
+				b = &fBuffers[i];
+				handle = i + 1;
+				fNextBuffer = i + 1;
+				break;
+			}
+		}
+		if (b == NULL) {
+			IOLockUnlock(gGPULock);
+			memory->complete(kIODirectionInOut);
+			memory->release();
+			return kIOReturnNoResources;
+		}
+		bzero(b, sizeof(*b));
+		b->memory = memory;
+		b->kernel = NULL;
+		b->size = size;
+		b->flags = MSM_BO_CACHED;
+		b->address = 0;
+		b->seen = true;
+		b->client_iova = true;
+		b->imported = true;
+		fBufferCount++;
+		fBufferBytes += size;
+		IOLockUnlock(gGPULock);
+
+		reply->handle = handle;
+		*output_size = sizeof(*reply);
+		return kIOReturnSuccess;
+	}
+
+	case kNativeAdrenoMethodSubmit: {
+		if (input == NULL || input_size < sizeof(uint32_t) * 2 + sizeof(uint64_t) * 3 ||
+		    output == NULL || *output_size < sizeof(NativeAdrenoAbiSubmitReply)) {
+			return kIOReturnBadArgument;
+		}
+		const NativeAdrenoAbiSubmit * req = (const NativeAdrenoAbiSubmit *)input;
+		NativeAdrenoAbiSubmitReply * reply = (NativeAdrenoAbiSubmitReply *)output;
+
+		if (req->buffer_count == 0 || req->buffer_count > GPU_SUBMIT_CMDS) {
+			return kIOReturnBadArgument;
+		}
+
+		uint64_t addresses[GPU_SUBMIT_CMDS];
+		uint32_t words[GPU_SUBMIT_CMDS];
+
+		IOLockLock(gGPULock);
+		for (uint32_t i = 0; i < req->buffer_count; i++) {
+			struct gpu_buffer * b = buffer((uint32_t)req->buffers[i].handle);
+			if (b == NULL) {
+				IOLockUnlock(gGPULock);
+				return kIOReturnBadArgument;
+			}
+			if (b->kernel != NULL && (b->seen || gGPUCached)) {
+				hakios_gpu_to_memory(b->kernel, b->size);
+			}
+			addresses[i] = req->buffers[i].iova;
+			words[i] = (uint32_t)(req->buffers[i].bytes / 4);
+		}
+		hakios_gpu_to_memory(NULL, 0);
+
+		char who[32] = {};
+		proc_selfname(who, sizeof(who));
+		IOLog("NativeAdreno: [%s] Submit %u buffers (b0 handle=%llu iova=0x%llx words=%u)\n",
+		    who, req->buffer_count, req->buffers[0].handle, req->buffers[0].iova, words[0]);
+
+		uint32_t fence = hakios_gpu_submit(addresses, words, req->buffer_count);
+		if (fence == 0) {
+			IOLockUnlock(gGPULock);
+			return kIOReturnBusy;
+		}
+		for (uint32_t i = 0; i < req->buffer_count; i++) {
+			struct gpu_buffer * b = buffer((uint32_t)req->buffers[i].handle);
+			if (b != NULL) {
+				b->fence = fence;
+			}
+		}
+		reply->fence = fence;
+		*output_size = sizeof(*reply);
+		IOLockUnlock(gGPULock);
+		return kIOReturnSuccess;
+	}
+
+	case kNativeAdrenoMethodWaitFence: {
+		if (input == NULL || input_size < sizeof(NativeAdrenoAbiWaitFence)) {
+			return kIOReturnBadArgument;
+		}
+		const NativeAdrenoAbiWaitFence * req = (const NativeAdrenoAbiWaitFence *)input;
+		if (req->fence == 0) {
+			return kIOReturnBadArgument;
+		}
+
+		IOLockLock(gGPULock);
+		if (req->timeout_ns == 0) {
+			bool done = hakios_gpu_done((uint32_t)req->fence);
+			IOLockUnlock(gGPULock);
+			return done ? kIOReturnSuccess : kIOReturnTimeout;
+		}
+
+		uint64_t patience = req->timeout_ns / 1000000ULL;
+		if (patience == 0) {
+			patience = 1;
+		}
+
+		char who[32] = {};
+		proc_selfname(who, sizeof(who));
+		IOLog("NativeAdreno: [%s] WaitFence fence=%llu timeout_ns=%llu\n", who, req->fence, req->timeout_ns);
+
+		bool done = gpuWait((uint32_t)req->fence, patience);
+		IOLockUnlock(gGPULock);
+		return done ? kIOReturnSuccess : kIOReturnTimeout;
+	}
+
+	case kNativeAdrenoMethodGetTimestamp: {
+		if (output == NULL || *output_size < sizeof(NativeAdrenoAbiTimestamp)) {
+			return kIOReturnBadArgument;
+		}
+		NativeAdrenoAbiTimestamp * reply = (NativeAdrenoAbiTimestamp *)output;
+		reply->ticks = mach_absolute_time();
+		*output_size = sizeof(*reply);
+		return kIOReturnSuccess;
+	}
+
+	case kNativeAdrenoMethodGetStatus: {
+		if (output == NULL || *output_size < sizeof(NativeAdrenoAbiStatus)) {
+			return kIOReturnBadArgument;
+		}
+		NativeAdrenoAbiStatus * reply = (NativeAdrenoAbiStatus *)output;
+		reply->faults = 0;
+		reply->suspends = 0;
+		*output_size = sizeof(*reply);
+		return kIOReturnSuccess;
+	}
+
+	case kNativeAdrenoMethodSetMetadata: {
+		if (input != NULL && input_size >= sizeof(NativeAdrenoAbiMetadata)) {
+			const NativeAdrenoAbiMetadata * meta = (const NativeAdrenoAbiMetadata *)input;
+			char line[kNativeAdrenoAbiMetadataBytes + 1] = {};
+			uint32_t len = meta->bytes < kNativeAdrenoAbiMetadataBytes ? meta->bytes : kNativeAdrenoAbiMetadataBytes;
+			memcpy(line, meta->text, len);
+			line[len] = '\0';
+			char who[32] = {};
+			proc_selfname(who, sizeof(who));
+			IOLog("NativeAdreno: [%s] metadata report: %s\n", who, line);
+		}
+		return kIOReturnSuccess;
+	}
+
+	case kNativeAdrenoMethodGetMetadata:
+		return kIOReturnSuccess;
+
+	case kNativeAdrenoMethodCreateQueue: {
+		if (output == NULL || *output_size < sizeof(NativeAdrenoAbiQueueReply)) {
+			return kIOReturnBadArgument;
+		}
+		NativeAdrenoAbiQueueReply * reply = (NativeAdrenoAbiQueueReply *)output;
+		reply->queue = 1;
+		*output_size = sizeof(*reply);
+		return kIOReturnSuccess;
+	}
+
+	case kNativeAdrenoMethodCloseQueue:
+		return kIOReturnSuccess;
+
+	case 0x7001: { /* NGP_METHOD_MODE */
+		struct NGPMode {
+			uint32_t version;
+			uint32_t format;
+			uint32_t width;
+			uint32_t height;
+			uint32_t stride;
+			uint64_t bytes;
+		};
+		if (output == NULL || *output_size < sizeof(struct NGPMode)) {
+			return kIOReturnBadArgument;
+		}
+		struct NGPMode * mode = (struct NGPMode *)output;
+		mode->version = 1;
+		mode->format = 1; /* NGP_BGRX8888 */
+		mode->width = vinfo.v_width;
+		mode->height = vinfo.v_height;
+		mode->stride = vinfo.v_rowbytes;
+		mode->bytes = (uint64_t)vinfo.v_rowbytes * vinfo.v_height;
+		*output_size = sizeof(*mode);
+		return kIOReturnSuccess;
+	}
+
+	case 0x7002: { /* NGP_METHOD_WAIT_SWAP */
+		IOSleep(16);
+		return kIOReturnTimeout;
+	}
+
+	case 0x7003: { /* NGP_METHOD_COMPLETE_SWAP */
+		return kIOReturnSuccess;
+	}
+
+	default:
+		IOLog("HakiosGPU: unknown tunnel method %u\n", method);
+		return kIOReturnUnsupported;
+	}
+}
+
 IOReturn
 HakiosGPUUserClient::externalMethod(uint32_t selector, IOExternalMethodArguments * args,
     IOExternalMethodDispatch * dispatch, OSObject * target, void * reference)
 {
+	if (args == NULL || fBuffers == NULL) {
+		return kIOReturnBadArgument;
+	}
+	if (!hakios_gpu_ready() && selector != kHakiosShow) {
+		return kIOReturnNotReady;                       /* given back: the run is ending */
+	}
+
+	/* NativeAdreno wire tunnel from Turnip / NativeAdrenoMetal */
+	if (args->structureInput != NULL && args->structureInputSize >= 8 &&
+	    ((const uint32_t *)args->structureInput)[0] == NATIVE_ADRENO_TUNNEL_MAGIC) {
+		const uint32_t * header = (const uint32_t *)args->structureInput;
+		uint32_t method = header[1];
+		if (method == 0xffffffffu) {
+			return kIOReturnSuccess;
+		}
+		return handleTunnel(method, (const uint8_t *)args->structureInput + 8,
+		    args->structureInputSize - 8, args->structureOutput, &args->structureOutputSize);
+	}
+
 	union {
 		struct msm_param param;
 		struct msm_gem_new gemNew;
@@ -1097,11 +1875,8 @@ HakiosGPUUserClient::externalMethod(uint32_t selector, IOExternalMethodArguments
 	IOReturn ret = kIOReturnSuccess;
 	uint64_t zero = 0, patience, waitBegan;
 
-	if (args->structureInput == NULL || size > sizeof(r) || fBuffers == NULL) {
+	if (args->structureInput == NULL || size > sizeof(r)) {
 		return kIOReturnBadArgument;
-	}
-	if (!hakios_gpu_ready() && selector != kHakiosShow) {
-		return kIOReturnNotReady;                       /* given back: the run is ending */
 	}
 	bzero(&r, sizeof(r));
 	memcpy(&r, args->structureInput, size);

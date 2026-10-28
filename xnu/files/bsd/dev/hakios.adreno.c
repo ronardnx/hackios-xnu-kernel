@@ -3761,6 +3761,14 @@ hakios_gpu_worked(uint64_t *microseconds, uint32_t *submissions, uint32_t by[7])
 	gpu_timed_count = 0;
 }
 
+static bool s_a7xx_reset_pending = true;
+
+void
+hakios_gpu_request_context_reset(void)
+{
+	s_a7xx_reset_pending = true;
+}
+
 /*
  * Command buffers for the 3D core to run, in order: each an address and a count of words. As
  * Linux's a6xx_submit puts them in the ring. Returns the submission's number; 0: the ring is
@@ -3769,7 +3777,8 @@ hakios_gpu_worked(uint64_t *microseconds, uint32_t *submissions, uint32_t by[7])
 uint32_t
 hakios_gpu_submit(const uint64_t *addresses, const uint32_t *words, uint32_t count)
 {
-	uint32_t wanted = 26 + 4 * count, room = 0;
+	uint32_t wanted = (board->is_a7xx ? (s_a7xx_reset_pending ? 75 : 49) : 26) + 4 * count;
+	uint32_t room = 0;
 
 	for (int i = 0; i < 20000; i++) {
 		room = (rd(gpu.base + CP_RB_RPTR) + RING_WORDS - ring_at - 1) % RING_WORDS;
@@ -3785,27 +3794,138 @@ hakios_gpu_submit(const uint64_t *addresses, const uint32_t *words, uint32_t cou
 	if (++gpu_fence == 0) {
 		gpu_fence = 1;
 	}
-	ring_time(gpu_fence, 0);
-	ring_command(CP_EVENT_WRITE, 1);
-	ring(EVENT_INVALIDATE_DEPTH);
-	ring_command(CP_EVENT_WRITE, 1);
-	ring(EVENT_INVALIDATE_COLOR);
-	for (uint32_t i = 0; i < count; i++) {
-		ring_command(CP_INDIRECT_BUFFER, 3);
-		ring((uint32_t)addresses[i]);
-		ring((uint32_t)(addresses[i] >> 32));
-		ring(words[i]);
+
+	if (board->is_a7xx) {
+		const uint32_t at4 = CORE_SCRATCH_ADDRESS + GPU_FENCE_AT;
+		const uint32_t bv = CORE_SCRATCH_ADDRESS + GPU_FENCE_AT + 8;
+
+		ring_command(0x17 /* CP_THREAD_CONTROL */, 1);
+		ring((1u << 31) | 1 /* SYNC_THREADS | THREAD_BR */);
+
+		if (s_a7xx_reset_pending) {
+			s_a7xx_reset_pending = false;
+			ring_command(0x14 /* CP_WAIT_TIMESTAMP */, 4);
+			ring(0);
+			ring(at4);
+			ring(0);
+			ring(gpu_fence - 1);
+
+			ring_command(0x17, 1);
+			ring((1u << 31) | 3 /* SYNC_THREADS | THREAD_BOTH */);
+
+			ring_command(0x1f /* CP_RESET_CONTEXT_STATE */, 1);
+			ring(0xf /* RESET_ALL */);
+
+			ring_command(0x17, 1);
+			ring((1u << 31) | 3);
+
+			ring_command(0x46 /* CP_EVENT_WRITE */, 1);
+			ring(0x26 /* LRZ_FLUSH_INVALIDATE */);
+
+			ring_command(0x17, 1);
+			ring((1u << 31) | 1 /* SYNC_THREADS | THREAD_BR */);
+
+			ring_register(0x050e /* RBBM_PERFCTR_SRAM_INIT_CMD */, 1);
+
+			ring_command(0x46, 1);
+			ring(0x31 /* CACHE_INVALIDATE */);
+
+			ring_command(0x3c /* CP_WAIT_REG_MEM */, 6);
+			ring(3 /* WAIT_WRITE_EQ */);
+			ring(0x050f /* RBBM_PERFCTR_SRAM_INIT_STATUS */);
+			ring(0);
+			ring(1);
+			ring(1);
+			ring(0);
+		}
+
+		/* CACHE_FLUSH7 & CACHE_INVALIDATE7 */
+		ring_command(0x46, 1);
+		ring(0x32);
+		ring_command(0x46, 1);
+		ring(0x33);
+
+		ring_command(0x26 /* CP_WAIT_FOR_IDLE */, 0);
+
+		/* Switch to BOTH threads (BR and BV) for user command execution */
+		ring_command(0x17 /* CP_THREAD_CONTROL */, 1);
+		ring(3 /* THREAD_BOTH */);
+
+		/* Disable IFPC */
+		ring_command(0x65 /* CP_SET_MARKER */, 1);
+		ring(0x101);
+
+		for (uint32_t i = 0; i < count; i++) {
+			ring_command(CP_INDIRECT_BUFFER, 3);
+			ring((uint32_t)addresses[i]);
+			ring((uint32_t)(addresses[i] >> 32));
+			ring(words[i]);
+		}
+
+		/* Framed fence */
+		ring_register(CP_SCRATCH_REG2, gpu_fence);
+
+		/* CCU cache flush on BR */
+		ring_command(0x17 /* CP_THREAD_CONTROL */, 1);
+		ring(1 /* THREAD_BR */);
+		ring_command(0x46, 1);
+		ring(0x18 /* CCU_INVALIDATE_DEPTH */);
+		ring_command(0x46, 1);
+		ring(0x19 /* CCU_INVALIDATE_COLOR */);
+
+		/* BV timestamp write */
+		ring_command(0x17 /* CP_THREAD_CONTROL */, 1);
+		ring(2 /* THREAD_BV */);
+		ring_command(0x46, 4);
+		ring(0x31 | (1u << 27) /* CACHE_CLEAN | WRITE_ENABLED */);
+		ring(bv);
+		ring(0);
+		ring(gpu_fence);
+
+		/* BR waits for BV timestamp */
+		ring_command(0x17 /* CP_THREAD_CONTROL */, 1);
+		ring(1 /* THREAD_BR */);
+		ring_command(0x14 /* CP_WAIT_TIMESTAMP */, 4);
+		ring(0);
+		ring(bv);
+		ring(0);
+		ring(gpu_fence);
+
+		/* Final ring timestamp write with interrupt to fence */
+		ring_command(0x46, 4);
+		ring(0x31 | (1u << 27) | (1u << 31) /* CACHE_CLEAN | WRITE_ENABLED | IRQ */);
+		ring(at4);
+		ring(0);
+		ring(gpu_fence);
+
+		/* Re-enable both threads and IFPC */
+		ring_command(0x17 /* CP_THREAD_CONTROL */, 1);
+		ring(3 /* THREAD_BOTH */);
+		ring_command(0x65 /* CP_SET_MARKER */, 1);
+		ring(0x100);
+	} else {
+		ring_time(gpu_fence, 0);
+		ring_command(CP_EVENT_WRITE, 1);
+		ring(EVENT_INVALIDATE_DEPTH);
+		ring_command(CP_EVENT_WRITE, 1);
+		ring(EVENT_INVALIDATE_COLOR);
+		for (uint32_t i = 0; i < count; i++) {
+			ring_command(CP_INDIRECT_BUFFER, 3);
+			ring((uint32_t)addresses[i]);
+			ring((uint32_t)(addresses[i] >> 32));
+			ring(words[i]);
+		}
+		if (gpu_exact) {
+			ring_command(CP_WAIT_FOR_IDLE, 0);      /* the time is the pipeline's, not the command processor's, which is ahead of it */
+		}
+		ring_time(gpu_fence, 1);
+		ring_register(CP_SCRATCH_REG2, gpu_fence);
+		ring_command(CP_EVENT_WRITE, 4);
+		ring(EVENT_CACHE_FLUSH);
+		ring(CORE_SCRATCH_ADDRESS + GPU_FENCE_AT);
+		ring(0);
+		ring(gpu_fence);
 	}
-	if (gpu_exact) {
-		ring_command(CP_WAIT_FOR_IDLE, 0);      /* the time is the pipeline's, not the command processor's, which is ahead of it */
-	}
-	ring_time(gpu_fence, 1);
-	ring_register(CP_SCRATCH_REG2, gpu_fence);
-	ring_command(CP_EVENT_WRITE, 4);
-	ring(EVENT_CACHE_FLUSH | (board->is_a7xx ? (1u << 27) : 0));
-	ring(CORE_SCRATCH_ADDRESS + GPU_FENCE_AT);
-	ring(0);
-	ring(gpu_fence);
 	ring_send();
 	return gpu_fence;
 }

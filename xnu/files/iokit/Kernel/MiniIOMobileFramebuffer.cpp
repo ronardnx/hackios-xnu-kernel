@@ -1477,9 +1477,25 @@ publishDisplayNode(void)
 class IOAcceleratorES : public IOService
 {
 	OSDeclareDefaultStructors(IOAcceleratorES);
+
+public:
+	virtual IOReturn newUserClient(task_t owningTask, void * securityID,
+	    UInt32 type, OSDictionary * properties,
+	    IOUserClient ** handler) APPLE_KEXT_OVERRIDE;
 };
 
 OSDefineMetaClassAndStructors(IOAcceleratorES, IOService);
+
+extern "C" IOReturn hakios_adreno_new_user_client(IOService * service, task_t owningTask, void * securityID,
+    UInt32 type, OSDictionary * properties, IOUserClient ** handler);
+
+IOReturn
+IOAcceleratorES::newUserClient(task_t owningTask, void * securityID,
+    UInt32 type, OSDictionary * properties,
+    IOUserClient ** handler)
+{
+	return hakios_adreno_new_user_client(this, owningTask, securityID, type, properties, handler);
+}
 
 static void
 publishAccelerator(IOService * provider)

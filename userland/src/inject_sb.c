@@ -1249,6 +1249,258 @@ load_tweaks(void)
 	}
 }
 
+/* ---- metallib resource fallback for MetalPerformanceShaders / CoreImage ----------- */
+
+static CFURLRef fallback_metallib_url;
+static CFStringRef fallback_metallib_path;
+static id (*original_url_for_resource)(id self, SEL sel, id name, id ext);
+static id (*original_url_for_resource_sub)(id self, SEL sel, id name, id ext, id sub);
+static id (*original_path_for_resource)(id self, SEL sel, id name, id ext);
+static id (*original_path_for_resource_sub)(id self, SEL sel, id name, id ext, id sub);
+
+static bool
+is_metallib_resource(id name, id ext)
+{
+	if (ext != nil && CFGetTypeID((CFTypeRef)ext) == CFStringGetTypeID()) {
+		if (CFStringCompare((CFStringRef)ext, CFSTR("metallib"), kCFCompareCaseInsensitive) == kCFCompareEqualTo) {
+			return true;
+		}
+	}
+	if (name != nil && CFGetTypeID((CFTypeRef)name) == CFStringGetTypeID()) {
+		if (CFStringHasSuffix((CFStringRef)name, CFSTR(".metallib"))) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static id
+hook_URLForResource_withExtension(id self, SEL sel, id name, id ext)
+{
+	id res = original_url_for_resource ? original_url_for_resource(self, sel, name, ext) : nil;
+	if (res != nil) {
+		return res;
+	}
+	if (is_metallib_resource(name, ext) && fallback_metallib_url != NULL) {
+		char c_name[128] = "";
+		if (name != nil && CFGetTypeID((CFTypeRef)name) == CFStringGetTypeID()) {
+			CFStringGetCString((CFStringRef)name, c_name, sizeof(c_name), kCFStringEncodingUTF8);
+		}
+		say("hakios: metallib: NSBundle URLForResource:\"%s\" fallback -> %p\n",
+		    c_name, (void *)fallback_metallib_url);
+		return (id)fallback_metallib_url;
+	}
+	return nil;
+}
+
+static id
+hook_URLForResource_withExtension_sub(id self, SEL sel, id name, id ext, id sub)
+{
+	id res = original_url_for_resource_sub ? original_url_for_resource_sub(self, sel, name, ext, sub) : nil;
+	if (res != nil) {
+		return res;
+	}
+	if (is_metallib_resource(name, ext) && fallback_metallib_url != NULL) {
+		char c_name[128] = "";
+		if (name != nil && CFGetTypeID((CFTypeRef)name) == CFStringGetTypeID()) {
+			CFStringGetCString((CFStringRef)name, c_name, sizeof(c_name), kCFStringEncodingUTF8);
+		}
+		say("hakios: metallib: NSBundle URLForResource:\"%s\" sub fallback -> %p\n",
+		    c_name, (void *)fallback_metallib_url);
+		return (id)fallback_metallib_url;
+	}
+	return nil;
+}
+
+static id
+hook_pathForResource_ofType(id self, SEL sel, id name, id ext)
+{
+	id res = original_path_for_resource ? original_path_for_resource(self, sel, name, ext) : nil;
+	if (res != nil) {
+		return res;
+	}
+	if (is_metallib_resource(name, ext) && fallback_metallib_path != NULL) {
+		char c_name[128] = "";
+		if (name != nil && CFGetTypeID((CFTypeRef)name) == CFStringGetTypeID()) {
+			CFStringGetCString((CFStringRef)name, c_name, sizeof(c_name), kCFStringEncodingUTF8);
+		}
+		say("hakios: metallib: NSBundle pathForResource:\"%s\" fallback -> %p\n",
+		    c_name, (void *)fallback_metallib_path);
+		return (id)fallback_metallib_path;
+	}
+	return nil;
+}
+
+static id
+hook_pathForResource_ofType_inDirectory(id self, SEL sel, id name, id ext, id sub)
+{
+	id res = original_path_for_resource_sub ? original_path_for_resource_sub(self, sel, name, ext, sub) : nil;
+	if (res != nil) {
+		return res;
+	}
+	if (is_metallib_resource(name, ext) && fallback_metallib_path != NULL) {
+		char c_name[128] = "";
+		if (name != nil && CFGetTypeID((CFTypeRef)name) == CFStringGetTypeID()) {
+			CFStringGetCString((CFStringRef)name, c_name, sizeof(c_name), kCFStringEncodingUTF8);
+		}
+		say("hakios: metallib: NSBundle pathForResource:\"%s\" inDirectory fallback -> %p\n",
+		    c_name, (void *)fallback_metallib_path);
+		return (id)fallback_metallib_path;
+	}
+	return nil;
+}
+
+static void
+metallib_hook(void)
+{
+	static const char *const candidates[] = {
+		"/redwood/share/default.metallib",
+		"/System/Library/Extensions/AppleMetalGLRenderer.bundle/default.metallib",
+		"/share/default.metallib",
+	};
+	const char *chosen = NULL;
+
+	for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
+		if (access(candidates[i], R_OK) == 0) {
+			chosen = candidates[i];
+			break;
+		}
+	}
+	if (chosen == NULL) {
+		chosen = candidates[0];
+	}
+	fallback_metallib_path = CFStringCreateWithCString(kCFAllocatorDefault, chosen, kCFStringEncodingUTF8);
+	if (fallback_metallib_path != NULL) {
+		fallback_metallib_url = CFURLCreateWithFileSystemPath(kCFAllocatorDefault, fallback_metallib_path,
+		    kCFURLPOSIXPathStyle, false);
+	}
+	say("hakios: metallib fallback: path \"%s\" (url=%p)\n", chosen, (void *)fallback_metallib_url);
+
+	Class cls = objc_getClass("NSBundle");
+	if (cls == NULL) {
+		dlopen("/System/Library/Frameworks/Foundation.framework/Foundation", RTLD_GLOBAL | RTLD_LAZY);
+		cls = objc_getClass("NSBundle");
+	}
+	if (cls == NULL) {
+		say("hakios: metallib fallback: NSBundle class not found\n");
+		return;
+	}
+
+	Method m1 = class_getInstanceMethod(cls, sel_registerName("URLForResource:withExtension:"));
+	if (m1 != NULL) {
+		original_url_for_resource = (id (*)(id, SEL, id, id))method_getImplementation(m1);
+		method_setImplementation(m1, (IMP)hook_URLForResource_withExtension);
+	}
+	Method m2 = class_getInstanceMethod(cls, sel_registerName("URLForResource:withExtension:subdirectory:"));
+	if (m2 != NULL) {
+		original_url_for_resource_sub = (id (*)(id, SEL, id, id, id))method_getImplementation(m2);
+		method_setImplementation(m2, (IMP)hook_URLForResource_withExtension_sub);
+	}
+	Method m3 = class_getInstanceMethod(cls, sel_registerName("pathForResource:ofType:"));
+	if (m3 != NULL) {
+		original_path_for_resource = (id (*)(id, SEL, id, id))method_getImplementation(m3);
+		method_setImplementation(m3, (IMP)hook_pathForResource_ofType);
+	}
+	Method m4 = class_getInstanceMethod(cls, sel_registerName("pathForResource:ofType:inDirectory:"));
+	if (m4 != NULL) {
+		original_path_for_resource_sub = (id (*)(id, SEL, id, id, id))method_getImplementation(m4);
+		method_setImplementation(m4, (IMP)hook_pathForResource_ofType_inDirectory);
+	}
+	say("hakios: metallib hooks installed on NSBundle (m1=%p m2=%p m3=%p m4=%p)\n",
+	    (void *)m1, (void *)m2, (void *)m3, (void *)m4);
+}
+
+/* ---- MetalPerformanceShaders graceful CPU fallback hooks ------------------------ */
+
+static id
+mps_fail_init(id self, const char *name)
+{
+	say("hakios: MPS %s intercepted -> returning nil\n", name);
+	if (self) {
+		((void (*)(id, SEL))objc_msgSend)(self, sel_registerName("release"));
+	}
+	return nil;
+}
+
+static id
+hook_MPSImageGaussianBlur_init_sigma(id self, SEL sel, id device, float sigma)
+{
+	return mps_fail_init(self, "-[MPSImageGaussianBlur initWithDevice:sigma:]");
+}
+
+static id
+hook_MPSImageGaussianBlur_init(id self, SEL sel, id device)
+{
+	return mps_fail_init(self, "-[MPSImageGaussianBlur initWithDevice:]");
+}
+
+static id
+hook_MPSImageTent_init_sigma(id self, SEL sel, id device, float sigma)
+{
+	return mps_fail_init(self, "-[MPSImageTent initWithDevice:sigma:]");
+}
+
+static id
+hook_MPSImageBox_init(id self, SEL sel, id device, unsigned long w, unsigned long h)
+{
+	return mps_fail_init(self, "-[MPSImageBox initWithDevice:kernelWidth:kernelHeight:]");
+}
+
+static id
+hook_MPSImageConvolution_init(id self, SEL sel, id device, unsigned long w, unsigned long h, const float *weights)
+{
+	return mps_fail_init(self, "-[MPSImageConvolution initWithDevice:kernelWidth:kernelHeight:weights:]");
+}
+
+static id
+hook_MPSKernel_init(id self, SEL sel, id device)
+{
+	return mps_fail_init(self, "-[MPSKernel initWithDevice:]");
+}
+
+static id
+hook_MPSUnaryImageKernel_init(id self, SEL sel, id device)
+{
+	return mps_fail_init(self, "-[MPSUnaryImageKernel initWithDevice:]");
+}
+
+static id
+hook_MPSBinaryImageKernel_init(id self, SEL sel, id device)
+{
+	return mps_fail_init(self, "-[MPSBinaryImageKernel initWithDevice:]");
+}
+
+static void
+hook_class_method(const char *cls_name, const char *sel_name, IMP replacement)
+{
+	Class cls = objc_getClass(cls_name);
+	if (cls == NULL) {
+		return;
+	}
+	Method m = class_getInstanceMethod(cls, sel_registerName(sel_name));
+	if (m != NULL) {
+		method_setImplementation(m, replacement);
+		say("hakios: hooked -[%s %s]\n", cls_name, sel_name);
+	}
+}
+
+static void
+mps_hook(void)
+{
+	dlopen("/System/Library/Frameworks/MetalPerformanceShaders.framework/Frameworks/MPSCore.framework/MPSCore", RTLD_GLOBAL | RTLD_LAZY);
+	dlopen("/System/Library/Frameworks/MetalPerformanceShaders.framework/Frameworks/MPSImage.framework/MPSImage", RTLD_GLOBAL | RTLD_LAZY);
+	dlopen("/System/Library/Frameworks/MetalPerformanceShaders.framework/MetalPerformanceShaders", RTLD_GLOBAL | RTLD_LAZY);
+
+	hook_class_method("MPSImageGaussianBlur", "initWithDevice:sigma:", (IMP)hook_MPSImageGaussianBlur_init_sigma);
+	hook_class_method("MPSImageGaussianBlur", "initWithDevice:", (IMP)hook_MPSImageGaussianBlur_init);
+	hook_class_method("MPSImageTent", "initWithDevice:sigma:", (IMP)hook_MPSImageTent_init_sigma);
+	hook_class_method("MPSImageBox", "initWithDevice:kernelWidth:kernelHeight:", (IMP)hook_MPSImageBox_init);
+	hook_class_method("MPSImageConvolution", "initWithDevice:kernelWidth:kernelHeight:weights:", (IMP)hook_MPSImageConvolution_init);
+	hook_class_method("MPSUnaryImageKernel", "initWithDevice:", (IMP)hook_MPSUnaryImageKernel_init);
+	hook_class_method("MPSBinaryImageKernel", "initWithDevice:", (IMP)hook_MPSBinaryImageKernel_init);
+	hook_class_method("MPSKernel", "initWithDevice:", (IMP)hook_MPSKernel_init);
+}
+
 __attribute__((constructor))
 static void
 hakios_springboard_init(void)
@@ -1257,6 +1509,9 @@ hakios_springboard_init(void)
 	size_t length = 0;
 	IMP activation, snapshot_format, battery_lvl, battery_st, poster_switcher;
 	int token;
+
+	metallib_hook();
+	mps_hook();
 
 	if (name == NULL) {
 		return;
